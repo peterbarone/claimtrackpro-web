@@ -7,7 +7,6 @@ async function getData() {
   const url = process.env.NEXT_PUBLIC_DIRECTUS_URL!;
   const client = createDirectus(url).with(rest());
   try {
-    // adjust "claims" to your actual collection name if different
     const items = await client.request(readItems<Claim>('claims', { limit: 1 }));
     return { ok: true, count: Array.isArray(items) ? items.length : 0, url };
   } catch (e: any) {
@@ -18,7 +17,7 @@ async function getData() {
 export default async function Page() {
   const res = await getData();
   return (
-    <main style={{ padding: 32, fontFamily: 'system-ui' }}>
+    <main style={{ padding: 32 }}>
       <h1>ClaimTrackPro</h1>
       <p>Directus URL: <code>{res.url}</code></p>
       {res.ok ? (
