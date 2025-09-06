@@ -7,7 +7,7 @@ async function getData() {
   const url = process.env.NEXT_PUBLIC_DIRECTUS_URL!;
   const client = createDirectus(url).with(rest());
   try {
-    const items = await client.request(readItems<Claim>('claims', { limit: 1 }));
+    const items = await client.request(readItems('claims', { limit: 1 })); // ← changed
     return { ok: true, count: Array.isArray(items) ? items.length : 0, url };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? 'unknown', url };
@@ -29,3 +29,4 @@ export default async function Page() {
     </main>
   );
 }
+
