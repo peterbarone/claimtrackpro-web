@@ -1,95 +1,66 @@
 // app/page.tsx
-type Ping = {
-  ok: boolean;
-  url: string;
-  error?: string;
-  status?: number;
-  details?: any;
-  count?: number;
-};
+import { createDirectus, rest, staticToken, readItems } from '@directus/sdk';
 
-async function pingDirectus(): Promise<Ping> {
-  const url = process.env.NEXT_PUBLIC_DIRECTUS_URL!;
-  const token = process.env.DIRECTUS_STATIC_TOKEN; // optional
+type Claim = { id: string };
 
-  // First, check Directus health
+function getEnv(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing required env var: ${name}`);
+  return v;
+}
+
+function makeClient() {
+  const url = getEnv('NEXT_PUBLIC_DIRECTUS_URL'); // visible to browser, but we use on server here
+  const token = getEnv('DIRECTUS_STATIC_TOKEN');   // server-only
+  return createDirectus(url).with(rest()).with(staticToken(token));
+}
+
+async function testQuery() {
   try {
-    const health = await fetch(`${url}/server/health`, { cache: "no-store" });
-    if (!health.ok) {
-      return { ok: false, url, status: health.status, error: `Health check failed (${health.status})` };
-    }
-  } catch (e: any) {
-    return { ok: false, url, error: `Health request failed: ${e?.message || String(e)}` };
-  }
-
-  // Then, try fetching 1 claim (unauth first, then with token if provided)
-  async function tryFetch(withToken: boolean) {
-    const headers: Record<string, string> = {};
-    if (withToken && token) headers.Authorization = `Bearer ${token}`;
-    const r = await fetch(`${url}/items/claims?limit=1`, {
-      headers,
-      cache: "no-store",
-    });
-    const text = await r.text(); // read as text so we can render any error JSON or HTML
-    return { r, text };
-  }
-
-  try {
-    // Unauthenticated attempt
-    let { r, text } = await tryFetch(false);
-    if (r.ok) {
-      // parse safe
-      try {
-        const json = JSON.parse(text);
-        const count = Array.isArray(json?.data) ? json.data.length : 0;
-        return { ok: true, url, count };
-      } catch {
-        return { ok: true, url, count: 0, details: "Fetched but could not parse JSON." };
-      }
-    }
-
-    // Try again with token if provided
-    if (token) {
-      const second = await tryFetch(true);
-      if (second.r.ok) {
-        try {
-          const json = JSON.parse(second.text);
-          const count = Array.isArray(json?.data) ? json.data.length : 0;
-          return { ok: true, url, count };
-        } catch {
-          return { ok: true, url, count: 0, details: "Fetched (with token) but could not parse JSON." };
-        }
-      }
-      return { ok: false, url, status: second.r.status, error: "Fetch with token failed", details: second.text };
-    }
-
-    // No token path
-    return { ok: false, url, status: r.status, error: "Fetch without token failed", details: text };
-  } catch (e: any) {
-    return { ok: false, url, error: e?.message || String(e) };
+    const client = makeClient();
+    const data = await client.request(readItems('claims', { limit: 1 }));
+    return { ok: true as const, count: Array.isArray(data) ? data.length : 0 };
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    // Try to capture Directus error payloads if present
+    const details = (err?.errors || err?.response || err?.cause) ?? null;
+    return { ok: false as const, error: msg, details };
   }
 }
 
 export default async function Page() {
-  const res = await pingDirectus();
+  const res = await testQuery();
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui" }}>
+    <main style={{ padding: 24, fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif' }}>
       <h1>ClaimTrackPro</h1>
-      <p>Directus URL: <code>{res.url}</code></p>
+      <p>
+        Directus URL: <code>{process.env.NEXT_PUBLIC_DIRECTUS_URL}</code>
+      </p>
+
       {res.ok ? (
-        <p>✅ Connected. Example query returned {res.count} item(s).</p>
+        <p>✅ Connected (token auth). Example query returned {res.count} item(s) from <code>claims</code>.</p>
       ) : (
         <div>
           <p>❌ Could not query Directus.</p>
-          {res.status ? <p>Status: {res.status}</p> : null}
-          {res.error ? <pre style={{ whiteSpace: "pre-wrap" }}>{res.error}</pre> : null}
-          {res.details ? <details><summary>Details</summary><pre style={{ whiteSpace: "pre-wrap" }}>{typeof res.details === 'string' ? res.details : JSON.stringify(res.details, null, 2)}</pre></details> : null}
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f6f6', padding: 12, borderRadius: 8 }}>
+            {res.error}
+          </pre>
+          {res.details ? (
+            <details>
+              <summary>Details</summary>
+              <pre style={{ whiteSpace: 'pre-wrap', background: '#f6f6f6', padding: 12, borderRadius: 8 }}>
+                {typeof res.details === 'string' ? res.details : JSON.stringify(res.details, null, 2)}
+              </pre>
+            </details>
+          ) : null}
         </div>
       )}
+
       <p>Health: <a href="/health">/health</a></p>
     </main>
   );
 }
+
 
 
