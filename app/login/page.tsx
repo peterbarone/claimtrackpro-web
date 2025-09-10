@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+"use client";
+import { useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
-export default function LoginPage() {
+function LoginPageInner() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -15,13 +16,10 @@ export default function LoginPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-
-    // simple client validation
     if (!email || !email.includes("@"))
       return setError("Please enter a valid email.");
     if (!password || password.length < 6)
       return setError("Password must be at least 6 characters.");
-
     setSubmitting(true);
     try {
       const res = await fetch("/api/auth/login", {
@@ -51,7 +49,6 @@ export default function LoginPage() {
             {error}
           </div>
         )}
-
         <div className="space-y-1">
           <label htmlFor="email" className="text-sm font-medium">
             Email
@@ -65,7 +62,6 @@ export default function LoginPage() {
             autoComplete="email"
           />
         </div>
-
         <div className="space-y-1">
           <label htmlFor="password" className="text-sm font-medium">
             Password
@@ -79,7 +75,6 @@ export default function LoginPage() {
             autoComplete="current-password"
           />
         </div>
-
         <button
           disabled={submitting}
           className="w-full rounded-xl bg-gray-900 text-white py-2 disabled:opacity-50"
@@ -88,5 +83,13 @@ export default function LoginPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginPageInner />
+    </Suspense>
   );
 }
