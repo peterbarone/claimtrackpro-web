@@ -18,12 +18,19 @@ type Me = {
 
 export async function loginWithPassword(email: string, password: string) {
   const client = directusBase();
-  // Directus SDK v10+ expects a payload object for login
-  const { access_token, refresh_token } = await client.login({ email, password });
-  if (access_token && refresh_token) {
-    setTokens({ access_token, refresh_token });
+  console.log('Attempting Directus login with:', email);
+  try {
+    const result = await client.login({ email, password });
+    console.log('Directus login result:', result);
+    const { access_token, refresh_token } = result;
+    if (access_token && refresh_token) {
+      setTokens({ access_token, refresh_token });
+    }
+    return await getMe(); // return user after setting cookies
+  } catch (err) {
+    console.error('Directus login error:', err);
+    throw err;
   }
-  return await getMe(); // return user after setting cookies
 }
 
 export async function logout() {
