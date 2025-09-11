@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-// import { HeaderUser } from '../components/HeaderUser';
+import { HeaderUser } from "./components/HeaderUser";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,7 +18,7 @@ export default function RootLayout({
         {/* Header */}
         <header className="flex justify-between items-center px-4 py-2 border-b">
           <h1 className="text-lg font-semibold">ClaimTrackPro</h1>
-          {/* <HeaderUser /> */}
+          <HeaderUser />
         </header>
 
         {/* Page content */}
