@@ -1,5 +1,6 @@
+// app/layout.tsx
 import type { Metadata } from "next";
-import { HeaderUser } from "./components/HeaderUser";
+import { HeaderWrapper } from "./components/HeaderWrapper";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,17 +13,12 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Next.js App Router doesn't give pathname here directly,
+  // so we’ll use a client component wrapper for the conditional header.
   return (
     <html lang="en">
       <body className="min-h-screen flex flex-col">
-        {/* Header */}
-        <header className="flex justify-between items-center px-4 py-2 border-b">
-          <h1 className="text-lg font-semibold">ClaimTrackPro</h1>
-          <HeaderUser />
-        </header>
-
-        {/* Page content */}
-        <main className="flex-1">{children}</main>
+        <HeaderWrapper>{children}</HeaderWrapper>
       </body>
     </html>
   );
