@@ -25,7 +25,7 @@ export async function GET() {
     return NextResponse.json({ ok: true, user: null });
   }
 
-  const client = directusBase();
+  const client = directusBase('/', { method: 'GET' }, access ?? '');
 
   async function fetchMe() {
     const me = await client.request<Me>(readMe({ fields: ['id', 'email', 'first_name', 'last_name', 'role.id', 'role.name'] }));
