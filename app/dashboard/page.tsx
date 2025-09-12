@@ -33,14 +33,27 @@ export default function DashboardPage() {
         <p className="text-lg">
           Welcome, <span className="font-semibold">{user.email}</span>!
         </p>
-        <section className="mt-4">
-          <h2 className="text-xl font-bold">Your Claims</h2>
-          <ul className="list-disc list-inside">
-            {user.claims.map((claim) => (
-              <li key={claim.id}>{claim.title}</li>
-            ))}
-          </ul>
-        </section>
+        <p className="mt-2 text-sm text-gray-600">This is your dashboard.</p>
+      </div>
+      <div className="mt-6 bg-white rounded-xl shadow p-6">
+        <h2 className="text-xl font-semibold mb-2">Your Claims</h2>
+        <p className="text-sm text-gray-600">You can view and manage your claims here.</p>
+        <button
+          onClick={() => router.push("/claims")}
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
+          View Claims
+        </button>
+      </div>
+      <div className="mt-6 bg-white rounded-xl shadow p-6">
+        <h2 className="text-xl font-semibold mb-2">Account Settings</h2>
+        <p className="text-sm text-gray-600">Manage your account settings and preferences.</p>
+        <button
+          onClick={() => router.push("/settings")}
+          className="mt-4 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+        >
+          Account Settings
+        </button> 
       </div>
     </div>
   );
