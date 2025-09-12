@@ -1,22 +1,27 @@
+// /app/api/auth/login/route.ts  (only cookie-name changes shown)
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
-import { loginWithPassword } from '../../../lib/auth';
 
-const Schema = z.object({
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
-});
+const ACCESS = 'd_access';
+const REFRESH = 'd_refresh';
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
-  const parsed = Schema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ ok: false, errors: parsed.error.flatten() }, { status: 400 });
-  }
-  try {
-    const user = await loginWithPassword(parsed.data.email, parsed.data.password);
-    return NextResponse.json({ ok: true, user });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, message: 'Invalid credentials' }, { status: 401 });
-  }
+  const { email, password } = await req.json();
+
+  const r = await fetch(`${process.env.DIRECTUS_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+    cache: 'no-store',
+  });
+
+  const data = await r.json();
+  if (!r.ok) return NextResponse.json(data, { status: r.status });
+
+  const res = NextResponse.json({ ok: true });
+  const cookieOpts = { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/' };
+
+  res.cookies.set(ACCESS, data.data.access_token, { ...cookieOpts, maxAge: 60 * 60 });
+  res.cookies.set(REFRESH, data.data.refresh_token, { ...cookieOpts, maxAge: 60 * 60 * 24 * 30 });
+
+  return res;
 }
