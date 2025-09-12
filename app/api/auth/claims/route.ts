@@ -7,12 +7,10 @@ import { cookies } from 'next/headers';
 const ACCESS = 'd_access';
 const REFRESH = 'd_refresh';
 
-const DIRECTUS_URL = process.env.DIRECTUS_URL!;
-if (!DIRECTUS_URL) {
-  throw new Error('Missing DIRECTUS_URL env var');
-}
-
 async function getClaims(accessToken: string) {
+  const DIRECTUS_URL = process.env.DIRECTUS_URL;
+  if (!DIRECTUS_URL) throw new Error('Missing DIRECTUS_URL env var');
+
   const r = await fetch(`${DIRECTUS_URL}/items/claims?limit=20&sort[]=-date_created`, {
     method: 'GET',
     headers: {
@@ -40,6 +38,9 @@ async function getClaims(accessToken: string) {
 }
 
 async function refreshTokens(refreshToken: string) {
+  const DIRECTUS_URL = process.env.DIRECTUS_URL;
+  if (!DIRECTUS_URL) throw new Error('Missing DIRECTUS_URL env var');
+
   const r = await fetch(`${DIRECTUS_URL}/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -1,4 +1,4 @@
-import { directusBase } from './directus';
+import directusBase from './directus';
 import type { RestCommand } from '@directus/sdk';
 // Custom RestCommand for /users/me
 const getUserMe = (): RestCommand<any, any> => () => ({
@@ -17,7 +17,7 @@ type Me = {
 };
 
 export async function loginWithPassword(email: string, password: string) {
-  const client = directusBase();
+  const client = directusBase('', { method: 'GET' }, undefined as any);
   console.log('Attempting Directus login with:', email);
   try {
     const result = await client.login({ email, password });
@@ -35,7 +35,7 @@ export async function loginWithPassword(email: string, password: string) {
 
 export async function logout() {
   try {
-    const client = directusBase();
+    const client = directusBase('', { method: 'GET' }, undefined as any);
     const { refresh } = getTokens();
     if (refresh) await client.logout({ refresh_token: refresh });
   } catch {/* ignore */}
@@ -43,7 +43,7 @@ export async function logout() {
 }
 
 export async function getMe(): Promise<Me | null> {
-  const client = directusBase();
+  const client = directusBase('', { method: 'GET' }, undefined as any);
   const { access, refresh } = getTokens();
 
   if (!access && !refresh) return null;
