@@ -33,7 +33,14 @@ export default function DashboardPage() {
         <p className="text-lg">
           Welcome, <span className="font-semibold">{user.email}</span>!
         </p>
-        {/* Add more user info or dashboard widgets here */}
+        <section className="mt-4">
+          <h2 className="text-xl font-bold">Your Claims</h2>
+          <ul className="list-disc list-inside">
+            {user.claims.map((claim) => (
+              <li key={claim.id}>{claim.title}</li>
+            ))}
+          </ul>
+        </section>
       </div>
     </div>
   );
