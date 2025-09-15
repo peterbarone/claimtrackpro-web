@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import directusBase from './lib/directus';
-import { readMe } from '@directus/sdk';
+import directusFetch from './lib/directus';
 
 type Me = {
   role?: { id: string; name: string } | null;
@@ -27,41 +26,27 @@ export async function middleware(req: NextRequest) {
   }
 
   try {
-    const client = directusBase('/', { method: 'GET' }, access ?? '');
-
-    if (access) client.setToken(access);
-
-    let res = await client.request<Me>(readMe({ fields: ['role.id', 'role.name'] }));
+    // Try to get user info with access token
+    let res = null;
+    if (access) {
+      res = await directusFetch('/users/me?fields=role', { method: 'GET' }, access);
+    }
 
     // If access is missing/expired, attempt refresh
-    if (!res?.role?.name && refresh) {
-      const data = await client.refresh({ refresh_token: refresh });
-
-      // Re-issue cookies with the new tokens
+    if ((!res || !res.role?.name) && refresh) {
+      // Try to refresh token via your refresh endpoint
+      const APP_URL = process.env.NEXT_PUBLIC_APP_URL!;
+      const r = await fetch(`${APP_URL}/api/auth/refresh`, { method: 'POST', cache: 'no-store' });
+      let newAccess = access;
+      if (r.ok) {
+        // Try again with new access token from cookies
+        const jar2 = req.cookies;
+        newAccess = jar2.get('d_access')?.value;
+        res = await directusFetch('/users/me?fields=role', { method: 'GET' }, newAccess);
+      }
+      // Re-issue cookies with the new tokens if present in response
       const next = NextResponse.next();
-      if (data?.access_token) {
-        next.cookies.set('d_access', data.access_token, {
-          httpOnly: true,
-          sameSite: 'lax', // change to 'none' if cross-site
-          path: '/',
-          secure: true,
-          maxAge: 60 * 60, // 1h
-        });
-        client.setToken(data.access_token);
-      }
-      if (data?.refresh_token) {
-        next.cookies.set('d_refresh', data.refresh_token, {
-          httpOnly: true,
-          sameSite: 'lax', // change to 'none' if cross-site
-          path: '/',
-          secure: true,
-          maxAge: 60 * 60 * 24 * 30, // 30d
-        });
-      }
-
-      // Re-check role
-      res = await client.request<Me>(readMe({ fields: ['role.id', 'role.name'] }));
-
+      // (If you want to set cookies from the refresh response, parse and set here)
       if (!res?.role?.name || (rule.roles && !rule.roles.includes(res.role.name))) {
         return NextResponse.redirect(new URL('/forbidden', req.url));
       }

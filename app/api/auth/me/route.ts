@@ -1,15 +1,14 @@
 // /app/api/auth/me/route.ts
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import directusBase from '../../../lib/directus';
-import { readMe } from '@directus/sdk';
+import directusFetch from '../../../lib/directus';
 
 type Me = {
   id: string;
   email: string | null;
   first_name?: string | null;
   last_name?: string | null;
-  role?: { id: string; name: string } | null;
+  role?: any;
 };
 
 const ACCESS = 'd_access';
@@ -25,41 +24,33 @@ export async function GET() {
     return NextResponse.json({ ok: true, user: null });
   }
 
-  const client = directusBase('/', { method: 'GET' }, access ?? '');
 
-  async function fetchMe() {
-    const me = await client.request<Me>(readMe({ fields: ['id', 'email', 'first_name', 'last_name', 'role.id', 'role.name'] }));
-    return me;
+  async function fetchMe(token?: string) {
+    // Use directusFetch to call /users/me endpoint
+    return directusFetch('/users/me?fields=id,email,first_name,last_name,role', { method: 'GET' }, token);
   }
 
   try {
-    if (access) client.setToken(access);
-    let me = await fetchMe();
+  let me = await fetchMe(access);
+  if (me && me.data) me = me.data;
 
-    // If we didn't get a role (likely expired), try refresh
-    if (!me?.id && refresh) {
-      const tokens = await client.refresh({ refresh_token: refresh });
-
-      // set new cookies
-      const res = NextResponse.json({ ok: true, user: null }); // temp, we’ll overwrite after we get user
-      if (tokens?.access_token) {
-        res.cookies.set(ACCESS, tokens.access_token, {
-          httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 60 * 60,
-        });
-        client.setToken(tokens.access_token);
+    // If we didn't get a user (likely expired), try refresh
+    if ((!me || !me.id) && refresh) {
+      // Try to refresh token via your refresh endpoint
+      const APP_URL = process.env.NEXT_PUBLIC_APP_URL!;
+      const r = await fetch(`${APP_URL}/api/auth/refresh`, { method: 'POST', cache: 'no-store' });
+      if (r.ok) {
+        // Try again with new access token from cookies
+        const jar2 = cookies();
+        const newAccess = jar2.get(ACCESS)?.value;
+        me = await fetchMe(newAccess);
       }
-      if (tokens?.refresh_token) {
-        res.cookies.set(REFRESH, tokens.refresh_token, {
-          httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 30,
-        });
-      }
-
-      me = await fetchMe();
-      return NextResponse.json({ ok: true, user: me }, res);
     }
 
-    // Normal success
-    return NextResponse.json({ ok: true, user: me ?? null });
+  // Debug: log the user object returned from Directus
+  console.log('Directus /users/me result:', me);
+  // Normal success
+  return NextResponse.json({ ok: true, user: me ?? null });
   } catch (err: any) {
     // If Directus returns 401 and no refresh token, treat as logged-out
     const msg = String(err?.message ?? '');

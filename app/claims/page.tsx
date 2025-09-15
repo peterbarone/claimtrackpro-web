@@ -1,24 +1,27 @@
 type Claim = {
   id: string;
   claim_number: string;
-  status_id: number;
+  status: number;
   date_of_loss: string;
   reported_date: string;
-  assigned_to_user: string;
+  assigned_to_user: string | null;
   description: string;
 };
 
 async function getClaims(): Promise<Claim[]> {
   try {
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_BASE_URL || ""}/api/claims`,
-      {
-        cache: "no-store",
-      }
-    );
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    if (!baseUrl) {
+      throw new Error(
+        "NEXT_PUBLIC_BASE_URL is not set. Please set it in your .env file."
+      );
+    }
+    const res = await fetch(`${baseUrl}/api/auth/claims`, {
+      cache: "no-store",
+    });
     if (!res.ok) return [];
     const data = await res.json();
-    return data.claims || [];
+    return data.data || [];
   } catch {
     return [];
   }
@@ -52,11 +55,23 @@ export default async function ClaimsPage() {
               claims.map((claim) => (
                 <tr key={claim.id} className="border-b hover:bg-gray-50">
                   <td className="px-3 py-2 border">{claim.claim_number}</td>
-                  <td className="px-3 py-2 border">{claim.status_id}</td>
-                  <td className="px-3 py-2 border">{claim.date_of_loss}</td>
-                  <td className="px-3 py-2 border">{claim.reported_date}</td>
-                  <td className="px-3 py-2 border">{claim.assigned_to_user}</td>
-                  <td className="px-3 py-2 border">{claim.description}</td>
+                  <td className="px-3 py-2 border">{claim.status ?? ""}</td>
+                  <td className="px-3 py-2 border">
+                    {claim.date_of_loss
+                      ? new Date(claim.date_of_loss).toLocaleDateString()
+                      : ""}
+                  </td>
+                  <td className="px-3 py-2 border">
+                    {claim.reported_date
+                      ? new Date(claim.reported_date).toLocaleDateString()
+                      : ""}
+                  </td>
+                  <td className="px-3 py-2 border">
+                    {claim.assigned_to_user ?? ""}
+                  </td>
+                  <td className="px-3 py-2 border">
+                    {claim.description ?? ""}
+                  </td>
                 </tr>
               ))
             )}

@@ -27,7 +27,8 @@ async function withUserToken(path: string): Promise<any> {
 export async function GET() {
   try {
     const data = await withUserToken('/items/claims?limit=50&sort[]=-date_created');
-    return NextResponse.json(data);
+      // Always return { claims: [...] } for the frontend table
+      return NextResponse.json({ claims: data?.data ?? [] });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
