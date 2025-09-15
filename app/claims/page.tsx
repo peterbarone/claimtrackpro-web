@@ -1,3 +1,6 @@
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+
 type Claim = {
   id: string;
   claim_number: string;
@@ -8,7 +11,7 @@ type Claim = {
   description: string;
 };
 
-async function getClaims(): Promise<Claim[]> {
+async function getClaims(cookieHeader: string): Promise<Claim[]> {
   try {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
     if (!baseUrl) {
@@ -18,6 +21,7 @@ async function getClaims(): Promise<Claim[]> {
     }
     const res = await fetch(`${baseUrl}/api/auth/claims`, {
       cache: "no-store",
+      headers: { Cookie: cookieHeader },
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -28,7 +32,18 @@ async function getClaims(): Promise<Claim[]> {
 }
 
 export default async function ClaimsPage() {
-  const claims = await getClaims();
+  const cookieStore = cookies();
+  const access = cookieStore.get("d_access")?.value;
+  const refresh = cookieStore.get("d_refresh")?.value;
+  if (!access && !refresh) {
+    redirect("/login");
+  }
+  // Pass cookies as header for SSR fetch
+  const cookieHeader = cookieStore
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join("; ");
+  const claims = await getClaims(cookieHeader);
   return (
     <div className="p-6">
       <h1 className="text-2xl font-semibold mb-4">Claims</h1>

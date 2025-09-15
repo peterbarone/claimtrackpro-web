@@ -11,7 +11,7 @@ async function getClaims(accessToken: string) {
   const DIRECTUS_URL = process.env.DIRECTUS_URL;
   if (!DIRECTUS_URL) throw new Error('Missing DIRECTUS_URL env var');
 
-  const r = await fetch(`${DIRECTUS_URL}/items/claims?limit=20&sort[]=-date_created`, {
+  const r = await fetch(`${DIRECTUS_URL}/items/claims?limit=20&sort[]=-date_created&fields=id,claim_number,status,date_of_loss,reported_date,assigned_to_user,description`, {
     method: 'GET',
     headers: {
       'Content-Type': 'application/json',
