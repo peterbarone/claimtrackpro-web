@@ -1,11 +1,5 @@
-import directusBase from './directus';
-import type { RestCommand } from '@directus/sdk';
-// Custom RestCommand for /users/me
-const getUserMe = (): RestCommand<any, any> => () => ({
-  path: '/users/me',
-  method: 'GET',
-  params: { fields: 'id,email,first_name,last_name,role.id,role.name' },
-});
+
+import directusFetch from './directus';
 import { getTokens, setTokens, clearTokens } from './auth-cookies';
 
 type Me = {
@@ -17,12 +11,21 @@ type Me = {
 };
 
 export async function loginWithPassword(email: string, password: string) {
-  const client = directusBase('', { method: 'GET' }, undefined as any);
   console.log('Attempting Directus login with:', email);
   try {
-    const result = await client.login({ email, password });
-    console.log('Directus login result:', result);
-    const { access_token, refresh_token } = result;
+    const url = process.env.DIRECTUS_URL;
+    if (!url) throw new Error('DIRECTUS_URL is not set');
+    const res = await fetch(url.replace(/\/$/, '') + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`Directus login failed: ${error}`);
+    }
+    const data = await res.json();
+    const { access_token, refresh_token } = data.data || {};
     if (access_token && refresh_token) {
       setTokens({ access_token, refresh_token });
     }
@@ -35,39 +38,56 @@ export async function loginWithPassword(email: string, password: string) {
 
 export async function logout() {
   try {
-    const client = directusBase('', { method: 'GET' }, undefined as any);
+    const url = process.env.DIRECTUS_URL;
+    if (!url) throw new Error('DIRECTUS_URL is not set');
     const { refresh } = getTokens();
-    if (refresh) await client.logout({ refresh_token: refresh });
+    if (refresh) {
+      await fetch(url.replace(/\/$/, '') + '/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+    }
   } catch {/* ignore */}
   clearTokens();
 }
 
 export async function getMe(): Promise<Me | null> {
-  const client = directusBase('', { method: 'GET' }, undefined as any);
   const { access, refresh } = getTokens();
 
   if (!access && !refresh) return null;
 
-  // Try current access token, otherwise refresh
   try {
-    if (access) client.setToken(access);
-    // Use the SDK's built-in request for /users/me
-  const me = await client.request(getUserMe());
-  return me as Me;
-  } catch {
+    if (access) {
+      const me = await directusFetch('/users/me?fields=id,email,first_name,last_name,role', { method: 'GET' }, access);
+      return me as Me;
+    }
     // Attempt refresh
-    if (!refresh) return null;
-    try {
-      const { access_token, refresh_token } = await client.refresh({ refresh_token: refresh });
+    if (refresh) {
+      const url = process.env.DIRECTUS_URL;
+      if (!url) throw new Error('DIRECTUS_URL is not set');
+      const res = await fetch(url.replace(/\/$/, '') + '/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+      if (!res.ok) {
+        clearTokens();
+        return null;
+      }
+      const data = await res.json();
+      const { access_token, refresh_token } = data.data || {};
       if (access_token && refresh_token) {
         setTokens({ access_token, refresh_token });
-        client.setToken(access_token);
+        const me = await directusFetch('/users/me?fields=id,email,first_name,last_name,role', { method: 'GET' }, access_token);
+        return me as Me;
       }
-  const me = await client.request(getUserMe());
-  return me as Me;
-    } catch {
       clearTokens();
       return null;
     }
+    return null;
+  } catch {
+    clearTokens();
+    return null;
   }
 }
