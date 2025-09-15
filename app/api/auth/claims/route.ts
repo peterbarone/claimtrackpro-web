@@ -71,6 +71,7 @@ export async function GET() {
     if (access) {
       try {
         const claims = await getClaims(access);
+        console.log("Claims from Directus:", claims);
         return NextResponse.json({ ok: true, data: claims.data });
       } catch (e: any) {
         if (e?.code !== 401) {
@@ -97,8 +98,9 @@ export async function GET() {
       httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 30,
     });
 
-    const claims = await getClaims(tokens.data.access_token);
-    return NextResponse.json({ ok: true, data: claims.data }, res);
+  const claims = await getClaims(tokens.data.access_token);
+  console.log("Claims from Directus (after refresh):", claims);
+  return NextResponse.json({ ok: true, data: claims.data }, res);
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
   }
