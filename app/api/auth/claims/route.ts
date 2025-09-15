@@ -4,8 +4,8 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { cookies, headers } from 'next/headers';
 
-const ACCESS = 'd_access';
-const REFRESH = 'd_refresh';
+const ACCESS = 'ctrk_jwt';
+const REFRESH = 'ctrk_rjwt';
 
 function getSecureFlag() {
   const h = headers();
