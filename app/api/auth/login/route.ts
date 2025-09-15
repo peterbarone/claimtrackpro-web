@@ -1,8 +1,8 @@
 // /app/api/auth/login/route.ts  (only cookie-name changes shown)
 import { NextResponse } from 'next/server';
 
-const ACCESS = 'd_access';
-const REFRESH = 'd_refresh';
+const ACCESS = 'ctrk_jwt';
+const REFRESH = 'ctrk_rjwt';
 
 export async function POST(req: Request) {
   const { email, password } = await req.json();
@@ -49,8 +49,8 @@ export async function POST(req: Request) {
     const res = NextResponse.json({ ok: true });
     const cookieOptsBase = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const, path: '/' };
 
-    res.cookies.set(ACCESS, data.data.access_token, { ...cookieOptsBase, maxAge: 60 * 60 });
-    res.cookies.set(REFRESH, data.data.refresh_token, { ...cookieOptsBase, maxAge: 60 * 60 * 24 * 30 });
+  res.cookies.set(ACCESS, data.data.access_token, { ...cookieOptsBase, maxAge: 60 * 15 }); // 15 min access
+  res.cookies.set(REFRESH, data.data.refresh_token, { ...cookieOptsBase, maxAge: 60 * 60 * 24 * 30 }); // 30 days
 
     return res;
   } catch (error) {

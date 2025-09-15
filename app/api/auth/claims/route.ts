@@ -69,8 +69,8 @@ async function refreshTokens(refreshToken: string) {
 export async function GET() {
   try {
     const jar = cookies();
-    const access = jar.get(ACCESS)?.value;
-    const refresh = jar.get(REFRESH)?.value;
+  const access = jar.get(ACCESS)?.value;
+  const refresh = jar.get(REFRESH)?.value;
 
     if (!access && !refresh) {
       return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 });
@@ -94,9 +94,9 @@ export async function GET() {
       return NextResponse.json({ ok: false, error: 'Missing refresh token' }, { status: 401 });
     }
 
-    const tokens = await refreshTokens(refresh);
-    const freshAccess = tokens.access_token;
-    const freshRefresh = tokens.refresh_token ?? refresh;
+  const tokens = await refreshTokens(refresh);
+  const freshAccess = tokens.access_token;
+  const freshRefresh = tokens.refresh_token ?? refresh;
 
     const claims = await getClaims(freshAccess);
 
@@ -104,14 +104,14 @@ export async function GET() {
     const resp = NextResponse.json({ ok: true, data: claims.data });
 
     const secure = getSecureFlag();
-    resp.cookies.set(ACCESS, freshAccess, {
+  resp.cookies.set(ACCESS, freshAccess, {
       httpOnly: true,
       secure,
       sameSite: 'lax',
       path: '/',
       // maxAge: tokens.expires_in ?? 60 * 15, // optional if you decode exp
     });
-    resp.cookies.set(REFRESH, freshRefresh, {
+  resp.cookies.set(REFRESH, freshRefresh, {
       httpOnly: true,
       secure,
       sameSite: 'lax',

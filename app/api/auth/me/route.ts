@@ -11,8 +11,8 @@ type Me = {
   role?: any;
 };
 
-const ACCESS = 'd_access';
-const REFRESH = 'd_refresh';
+const ACCESS = 'ctrk_jwt';
+const REFRESH = 'ctrk_rjwt';
 
 // Adjust these for your env
 const DIRECTUS_URL = process.env.NEXT_PUBLIC_DIRECTUS_URL || process.env.DIRECTUS_URL;

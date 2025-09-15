@@ -50,8 +50,8 @@ async function getClaims(cookieHeader: string): Promise<Claim[]> {
 
 export default async function ClaimsPage() {
   const jar = cookies();
-  const access = jar.get("d_access")?.value;
-  const refresh = jar.get("d_refresh")?.value;
+  const access = jar.get("ctrk_jwt")?.value;
+  const refresh = jar.get("ctrk_rjwt")?.value;
 
   // If no auth cookies at all, bounce to login (keeps UX snappy)
   if (!access && !refresh) {

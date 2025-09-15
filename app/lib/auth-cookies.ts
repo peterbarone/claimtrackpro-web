@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 
-const ACCESS = 'd_access';
-const REFRESH = 'd_refresh';
+const ACCESS = 'ctrk_jwt';
+const REFRESH = 'ctrk_rjwt';
 
 const isProd = process.env.NODE_ENV === 'production';
 const secure = process.env.COOKIE_SECURE === 'true' || isProd;

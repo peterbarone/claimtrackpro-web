@@ -18,8 +18,8 @@ export async function middleware(req: NextRequest) {
   if (!rule) return NextResponse.next();
 
   // Read tokens from cookies
-  const access = req.cookies.get('d_access')?.value;
-  const refresh = req.cookies.get('d_refresh')?.value;
+  const access = req.cookies.get('ctrk_jwt')?.value;
+  const refresh = req.cookies.get('ctrk_rjwt')?.value;
 
   if (!access && !refresh) {
     return NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(pathname)}`, req.url));
@@ -41,7 +41,7 @@ export async function middleware(req: NextRequest) {
       if (r.ok) {
         // Try again with new access token from cookies
         const jar2 = req.cookies;
-        newAccess = jar2.get('d_access')?.value;
+  newAccess = jar2.get('ctrk_jwt')?.value;
         res = await directusFetch('/users/me?fields=role', { method: 'GET' }, newAccess);
       }
       // Re-issue cookies with the new tokens if present in response
