@@ -30,6 +30,8 @@ function LoginPageInner() {
       router.replace(next);
     } catch (err: any) {
       setError(err.message || "Login failed");
+       console.log('DIRECTUS_URL at runtime:', process.env.DIRECTUS_URL);
+
     } finally {
       setSubmitting(false);
     }

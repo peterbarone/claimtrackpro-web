@@ -8,7 +8,7 @@ async function getClaim(id: string) {
   const headers: HeadersInit = { "Content-Type": "application/json" };
   if (STATIC_TOKEN) headers["Authorization"] = `Bearer ${STATIC_TOKEN}`;
 
-  const res = await fetch(`${DIRECTUS_URL}/items/claims/${id}`, {
+  const res = await fetch(`${DIRECTUS_URL}/api/auth/claims`, {
     headers,
     cache: "no-store",
   });

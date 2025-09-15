@@ -7,7 +7,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  useEffect(() => {
+useEffect(() => {
     async function fetchUser() {
       try {
         const res = await fetch("/api/auth/me");
