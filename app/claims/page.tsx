@@ -1,92 +1,114 @@
+// app/claims/page.tsx
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 type Claim = {
   id: string;
   claim_number: string;
-  status: number;
-  date_of_loss: string;
-  reported_date: string;
-  assigned_to_user: string | null;
-  description: string;
+  status: number | null;
+  date_of_loss?: string | null;
+  reported_date?: string | null;
+  assigned_to_user?: string | null;
+  description?: string | null;
+};
+
+const STATUS_LABEL: Record<number, string> = {
+  1: "New",
+  2: "Assigned",
+  3: "In Progress",
+  4: "On Hold",
+  5: "Closed",
 };
 
 async function getClaims(cookieHeader: string): Promise<Claim[]> {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
-    if (!baseUrl) {
-      throw new Error(
-        "NEXT_PUBLIC_BASE_URL is not set. Please set it in your .env file."
-      );
-    }
-    const res = await fetch(`${baseUrl}/api/auth/claims`, {
+    const res = await fetch(`/api/auth/claims`, {
       cache: "no-store",
-      headers: { Cookie: cookieHeader },
+      headers: {
+        Cookie: cookieHeader,
+        Accept: "application/json",
+      },
     });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.data || [];
+
+    if (res.status === 401) {
+      // Not authenticated → let the page handle redirect
+      return [];
+    }
+    if (!res.ok) {
+      // Optional: log the body for quick diagnostics
+      // const text = await res.text().catch(() => "");
+      // console.error("GET /api/auth/claims failed", res.status, text.slice(0, 300));
+      return [];
+    }
+
+    const json = await res.json(); // { ok, data }
+    return Array.isArray(json?.data) ? (json.data as Claim[]) : [];
   } catch {
     return [];
   }
 }
 
 export default async function ClaimsPage() {
-  const cookieStore = cookies();
-  const access = cookieStore.get("d_access")?.value;
-  const refresh = cookieStore.get("d_refresh")?.value;
+  const jar = cookies();
+  const access = jar.get("d_access")?.value;
+  const refresh = jar.get("d_refresh")?.value;
+
+  // If no auth cookies at all, bounce to login (keeps UX snappy)
   if (!access && !refresh) {
     redirect("/login");
   }
-  // Pass cookies as header for SSR fetch
-  const cookieHeader = cookieStore
+
+  // Forward all cookies to the API for SSR
+  const cookieHeader = jar
     .getAll()
     .map((c) => `${c.name}=${c.value}`)
     .join("; ");
+
   const claims = await getClaims(cookieHeader);
+
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-semibold mb-4">Claims</h1>
-      <div className="overflow-x-auto">
-        <table className="min-w-full border text-sm">
-          <thead>
-            <tr className="bg-gray-100">
-              <th className="px-3 py-2 border">Claim #</th>
-              <th className="px-3 py-2 border">Status</th>
-              <th className="px-3 py-2 border">Date of Loss</th>
-              <th className="px-3 py-2 border">Reported Date</th>
-              <th className="px-3 py-2 border">Assigned To</th>
-              <th className="px-3 py-2 border">Description</th>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Claims</h1>
+        <div className="text-sm text-gray-500">
+          {claims.length ? `${claims.length} result${claims.length > 1 ? "s" : ""}` : "No results"}
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 text-left">
+            <tr>
+              <th className="px-3 py-2 border-b">Claim #</th>
+              <th className="px-3 py-2 border-b">Status</th>
+              <th className="px-3 py-2 border-b">Date of Loss</th>
+              <th className="px-3 py-2 border-b">Reported Date</th>
+              <th className="px-3 py-2 border-b">Assigned To</th>
+              <th className="px-3 py-2 border-b">Description</th>
             </tr>
           </thead>
           <tbody>
             {claims.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-4">
+                <td colSpan={6} className="py-6 text-center text-gray-600">
                   No claims found.
                 </td>
               </tr>
             ) : (
-              claims.map((claim) => (
-                <tr key={claim.id} className="border-b hover:bg-gray-50">
-                  <td className="px-3 py-2 border">{claim.claim_number}</td>
-                  <td className="px-3 py-2 border">{claim.status ?? ""}</td>
-                  <td className="px-3 py-2 border">
-                    {claim.date_of_loss
-                      ? new Date(claim.date_of_loss).toLocaleDateString()
-                      : ""}
+              claims.map((c) => (
+                <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50">
+                  <td className="px-3 py-2">{c.claim_number}</td>
+                  <td className="px-3 py-2">
+                    {typeof c.status === "number" ? STATUS_LABEL[c.status] ?? c.status : ""}
                   </td>
-                  <td className="px-3 py-2 border">
-                    {claim.reported_date
-                      ? new Date(claim.reported_date).toLocaleDateString()
-                      : ""}
+                  <td className="px-3 py-2">
+                    {c.date_of_loss ? new Date(c.date_of_loss).toLocaleDateString() : ""}
                   </td>
-                  <td className="px-3 py-2 border">
-                    {claim.assigned_to_user ?? ""}
+                  <td className="px-3 py-2">
+                    {c.reported_date ? new Date(c.reported_date).toLocaleDateString() : ""}
                   </td>
-                  <td className="px-3 py-2 border">
-                    {claim.description ?? ""}
-                  </td>
+                  <td className="px-3 py-2">{c.assigned_to_user ?? ""}</td>
+                  <td className="px-3 py-2">{c.description ?? ""}</td>
                 </tr>
               ))
             )}
