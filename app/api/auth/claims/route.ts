@@ -68,11 +68,15 @@ async function refreshTokens(refreshToken: string) {
 
 export async function GET() {
   try {
-    const jar = cookies();
+  const jar = cookies();
+  const allCookies = jar.getAll();
   const access = jar.get(ACCESS)?.value;
   const refresh = jar.get(REFRESH)?.value;
+  console.log("Claims API: cookies", allCookies);
+  console.log("Claims API: access", access, "refresh", refresh);
 
     if (!access && !refresh) {
+      console.log("Claims API: No access or refresh token, not authenticated");
       return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 });
     }
 
@@ -80,9 +84,11 @@ export async function GET() {
     if (access) {
       try {
         const claims = await getClaims(access);
+        console.log("Claims API: fetched claims with access", claims);
         return NextResponse.json({ ok: true, data: claims.data });
       } catch (e: any) {
         if (e?.code !== 401) {
+          console.error("Claims API: error fetching claims with access", e);
           return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
         }
         // else fall through to refresh
@@ -91,6 +97,7 @@ export async function GET() {
 
     // 2) Refresh and retry
     if (!refresh) {
+      console.log("Claims API: Missing refresh token");
       return NextResponse.json({ ok: false, error: 'Missing refresh token' }, { status: 401 });
     }
 
@@ -98,29 +105,31 @@ export async function GET() {
   const freshAccess = tokens.access_token;
   const freshRefresh = tokens.refresh_token ?? refresh;
 
-    const claims = await getClaims(freshAccess);
+  const claims = await getClaims(freshAccess);
+  console.log("Claims API: fetched claims with refreshed access", claims);
 
-    // Build ONE response, set cookies on it, then return THAT response.
-    const resp = NextResponse.json({ ok: true, data: claims.data });
+  // Build ONE response, set cookies on it, then return THAT response.
+  const resp = NextResponse.json({ ok: true, data: claims.data });
 
-    const secure = getSecureFlag();
+  const secure = getSecureFlag();
   resp.cookies.set(ACCESS, freshAccess, {
-      httpOnly: true,
-      secure,
-      sameSite: 'lax',
-      path: '/',
-      // maxAge: tokens.expires_in ?? 60 * 15, // optional if you decode exp
-    });
+    httpOnly: true,
+    secure,
+    sameSite: 'lax',
+    path: '/',
+    // maxAge: tokens.expires_in ?? 60 * 15, // optional if you decode exp
+  });
   resp.cookies.set(REFRESH, freshRefresh, {
-      httpOnly: true,
-      secure,
-      sameSite: 'lax',
-      path: '/',
-      // maxAge: 60 * 60 * 24 * 30,
-    });
+    httpOnly: true,
+    secure,
+    sameSite: 'lax',
+    path: '/',
+    // maxAge: 60 * 60 * 24 * 30,
+  });
 
-    return resp;
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
-  }
+  return resp;
+   } catch (e: any) {
+     console.error("Claims API: top-level error", e);
+     return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
+   }
 }

@@ -52,6 +52,7 @@ export default async function ClaimsPage() {
   const jar = cookies();
   const access = jar.get("ctrk_jwt")?.value;
   const refresh = jar.get("ctrk_rjwt")?.value;
+  console.log("Claims page: accessing JWT cookies", { access, refresh });
 
   // If no auth cookies at all, bounce to login (keeps UX snappy)
   if (!access && !refresh) {
@@ -64,6 +65,7 @@ export default async function ClaimsPage() {
     .map((c) => `${c.name}=${c.value}`)
     .join("; ");
 
+  console.log("Claims page: fetching claims with cookies", cookieHeader);
   const claims = await getClaims(cookieHeader);
 
   return (
@@ -91,7 +93,8 @@ export default async function ClaimsPage() {
             {claims.length === 0 ? (
               <tr>
                 <td colSpan={6} className="py-6 text-center text-gray-600">
-                  No claims found.
+                  <div>No claims found.</div>
+                  console.log("Claims page: no claims found", claims);
                 </td>
               </tr>
             ) : (
