@@ -1,5 +1,6 @@
 // app/layout.tsx
 import type { Metadata } from "next";
+import AppShell from "./components/AppShell";
 import { HeaderWrapper } from "./components/HeaderWrapper";
 import "./globals.css";
 
