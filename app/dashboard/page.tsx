@@ -59,7 +59,7 @@ export default function DashboardPage() {
               Overview of your claims management system
             </p>
           </div>
-          <Link href="/claims/new">
+          <Link href="/claimintake">
             <Button className="bg-[#92C4D5] hover:bg-[#7BB3C7] text-white h-11 px-6">
               <PlusIcon className="h-4 w-4 mr-2" />
               New Claim

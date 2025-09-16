@@ -91,7 +91,7 @@ interface ClaimFormData {
   deductible: string;
 }
 
-export function ClaimIntake() {
+export default function ClaimIntake() {
   const router = useRouter();
 
   const getCurrentDate = () => new Date().toISOString().split("T")[0];
