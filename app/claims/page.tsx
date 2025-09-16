@@ -1,6 +1,7 @@
 // app/claims/page.tsx
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 
 type Claim = {
   id: string;
@@ -48,7 +49,11 @@ async function getClaims(cookieHeader: string): Promise<Claim[]> {
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error("getClaims: /api/auth/claims failed", res.status, text.slice(0, 300));
+      console.error(
+        "getClaims: /api/auth/claims failed",
+        res.status,
+        text.slice(0, 300)
+      );
       return [];
     }
 
@@ -86,7 +91,9 @@ export default async function ClaimsPage() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Claims</h1>
         <div className="text-sm text-gray-500">
-          {claims.length ? `${claims.length} result${claims.length > 1 ? "s" : ""}` : "No results"}
+          {claims.length
+            ? `${claims.length} result${claims.length > 1 ? "s" : ""}`
+            : "No results"}
         </div>
       </div>
 
@@ -112,16 +119,32 @@ export default async function ClaimsPage() {
               </tr>
             ) : (
               claims.map((c) => (
-                <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="px-3 py-2">{c.claim_number}</td>
+                <tr
+                  key={c.id}
+                  className="border-b last:border-0 hover:bg-gray-50"
+                >
                   <td className="px-3 py-2">
-                    {typeof c.status === "number" ? STATUS_LABEL[c.status] ?? c.status : ""}
+                    <Link
+                      href={`/claims/${c.id}`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {c.claim_number}
+                    </Link>
                   </td>
                   <td className="px-3 py-2">
-                    {c.date_of_loss ? new Date(c.date_of_loss).toLocaleDateString() : ""}
+                    {typeof c.status === "number"
+                      ? STATUS_LABEL[c.status] ?? c.status
+                      : ""}
                   </td>
                   <td className="px-3 py-2">
-                    {c.reported_date ? new Date(c.reported_date).toLocaleDateString() : ""}
+                    {c.date_of_loss
+                      ? new Date(c.date_of_loss).toLocaleDateString()
+                      : ""}
+                  </td>
+                  <td className="px-3 py-2">
+                    {c.reported_date
+                      ? new Date(c.reported_date).toLocaleDateString()
+                      : ""}
                   </td>
                   <td className="px-3 py-2">{c.assigned_to_user ?? ""}</td>
                   <td className="px-3 py-2">{c.description ?? ""}</td>
