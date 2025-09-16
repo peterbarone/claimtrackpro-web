@@ -22,7 +22,17 @@ const STATUS_LABEL: Record<number, string> = {
 
 async function getClaims(cookieHeader: string): Promise<Claim[]> {
   try {
-    const res = await fetch(`/api/auth/claims`, {
+    // Use absolute URL for SSR; works in both local and prod
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.NEXT_PUBLIC_SITE_URL
+      ? process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "")
+      : `http://localhost:3000`;
+    const apiUrl = `${baseUrl}/api/auth/claims`;
+
+    console.log("getClaims: using API URL", apiUrl);
+
+    const res = await fetch(apiUrl, {
       cache: "no-store",
       headers: {
         Cookie: cookieHeader,
