@@ -30,20 +30,23 @@ async function getClaims(cookieHeader: string): Promise<Claim[]> {
       },
     });
 
+    console.log("getClaims: API response status", res.status);
+
     if (res.status === 401) {
-      // Not authenticated → let the page handle redirect
+      console.log("getClaims: Not authenticated (401)");
       return [];
     }
     if (!res.ok) {
-      // Optional: log the body for quick diagnostics
-      // const text = await res.text().catch(() => "");
-      // console.error("GET /api/auth/claims failed", res.status, text.slice(0, 300));
+      const text = await res.text().catch(() => "");
+      console.error("getClaims: /api/auth/claims failed", res.status, text.slice(0, 300));
       return [];
     }
 
     const json = await res.json(); // { ok, data }
+    console.log("getClaims: API response body", json);
     return Array.isArray(json?.data) ? (json.data as Claim[]) : [];
-  } catch {
+  } catch (err) {
+    console.error("getClaims: error fetching claims", err);
     return [];
   }
 }

@@ -25,25 +25,32 @@ async function getClaims(accessToken: string) {
     {
       method: 'GET',
       headers: {
-        Authorization: `Bearer ${accessToken}`, // no need for Content-Type on GET
+        Authorization: `Bearer ${accessToken}`,
         Accept: 'application/json',
       },
       cache: 'no-store',
     }
   );
 
+  console.log("API getClaims: Directus response status", r.status);
+
   if (r.status === 401) {
     const msg = (await r.text()) || 'Unauthorized';
+    console.log("API getClaims: Unauthorized (401)", msg);
     const err: any = new Error(msg);
     err.code = 401;
     throw err;
   }
 
   if (!r.ok) {
-    throw new Error(`Directus ${r.status}: ${await r.text()}`);
+    const text = await r.text().catch(() => "");
+    console.error("API getClaims: Directus error", r.status, text.slice(0, 300));
+    throw new Error(`Directus ${r.status}: ${text}`);
   }
 
-  return (await r.json()) as { data: unknown[] };
+  const json = await r.json();
+  console.log("API getClaims: Directus response body", json);
+  return json as { data: unknown[] };
 }
 
 async function refreshTokens(refreshToken: string) {
@@ -57,12 +64,16 @@ async function refreshTokens(refreshToken: string) {
     cache: 'no-store',
   });
 
+  console.log("API refreshTokens: Directus response status", r.status);
+
   if (!r.ok) {
-    throw new Error(`Refresh failed ${r.status}: ${await r.text()}`);
+    const text = await r.text().catch(() => "");
+    console.error("API refreshTokens: Directus error", r.status, text.slice(0, 300));
+    throw new Error(`Refresh failed ${r.status}: ${text}`);
   }
 
-  // Directus v11: { data: { access_token, refresh_token, expires, ... } }
   const json = await r.json();
+  console.log("API refreshTokens: Directus response body", json);
   return json.data ?? json;
 }
 
