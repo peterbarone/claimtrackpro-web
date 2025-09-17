@@ -123,6 +123,12 @@ export default function ClaimIntake() {
 
   const [formData, setFormData] = useState<ClaimFormData>(initialForm);
 
+  // Helper to get staff name by ID
+  const getStaffName = (id: string, list: { id: string; name: string }[]) => {
+    const found = list.find((s) => s.id === id);
+    return found ? found.name : "";
+  };
+
   const [insuredPersons, setInsuredPersons] = useState<InsuredPerson[]>([
     { id: "1", firstName: "", lastName: "", email: "", phone: "", phone2: "" },
   ]);
@@ -145,33 +151,98 @@ export default function ClaimIntake() {
     return () => clearTimeout(timer);
   }, [formData, insuredPersons, additionalContacts, coverageLines]);
 
-  // Sample data
-  const clientCompanies = [
-    "Springfield Insurance Group",
-    "Metro Insurance Co.",
-    "National Claims Services",
-    "Regional Insurance Partners",
-  ] as const;
 
-  const clientContacts: Record<(typeof clientCompanies)[number], string[]> = {
-    "Springfield Insurance Group": ["Robert Taylor", "Jennifer Brown", "Mike Wilson"],
-    "Metro Insurance Co.": ["Sarah Davis", "John Smith", "Lisa Martinez"],
-    "National Claims Services": ["David Chen", "Maria Garcia", "James Wilson"],
-    "Regional Insurance Partners": ["Emily Johnson", "Michael Brown", "Amanda Taylor"],
-  };
+  // Dynamic client companies (Carriers)
+  const [clientCompanies, setClientCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [clientCompaniesLoading, setClientCompaniesLoading] = useState(true);
+  useEffect(() => {
+    setClientCompaniesLoading(true);
+    fetch("/api/carriers")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.data)) {
+          setClientCompanies(data.data.map((c: any) => ({ id: String(c.id), name: c.name })));
+        } else {
+          setClientCompanies([]);
+        }
+      })
+      .catch(() => setClientCompanies([]))
+      .finally(() => setClientCompaniesLoading(false));
+  }, []);
+
+  // Dynamic client contacts (per carrier)
+  const [clientContacts, setClientContacts] = useState<string[]>([]);
+  const [clientContactsLoading, setClientContactsLoading] = useState(false);
+  useEffect(() => {
+    if (!formData.clientCompany) {
+      setClientContacts([]);
+      return;
+    }
+    setClientContactsLoading(true);
+    fetch(`/api/carriers/${formData.clientCompany}/contacts`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.data)) {
+          setClientContacts(data.data.map((c: any) => c.name || c.full_name || c.email || ""));
+        } else {
+          setClientContacts([]);
+        }
+      })
+      .catch(() => setClientContacts([]))
+      .finally(() => setClientContactsLoading(false));
+  }, [formData.clientCompany]);
 
   const states = [
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY",
   ];
 
-  const lossTypes = [
-    "Fire","Water Damage","Wind","Hail","Theft","Vandalism","Vehicle","Weight of Ice and Snow","Other",
+  // Contact types for Additional Contacts
+  const contactTypes = [
+    "Agent",
+    "Broker",
+    "Tenant",
+    "Property Manager",
+    "Other",
   ];
 
-  const managers = ["Mike Wilson", "Jennifer Brown", "David Chen", "Lisa Martinez"];
-  const adjusters = ["Sarah Johnson", "Robert Taylor", "Emily Davis", "James Wilson"];
-  const contactTypes = ["Public Adjuster", "Contractor", "Attorney", "Family Member", "Other"];
+  // Dynamic loss causes
+  const [lossCauses, setLossCauses] = useState<{ id: string; name: string }[]>([]);
+  const [lossCausesLoading, setLossCausesLoading] = useState(true);
+  useEffect(() => {
+    setLossCausesLoading(true);
+    fetch("/api/loss-causes")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.data)) {
+          setLossCauses(data.data.map((c) => ({ id: String(c.id), name: c.name })));
+        } else {
+          setLossCauses([]);
+        }
+      })
+      .catch(() => setLossCauses([]))
+      .finally(() => setLossCausesLoading(false));
+  }, []);
 
+  // Dynamic managers and adjusters (all staff, no roles)
+  const [staff, setStaff] = useState<{ id: string; name: string }[]>([]);
+  const [staffLoading, setStaffLoading] = useState(true);
+  useEffect(() => {
+    setStaffLoading(true);
+    fetch("/api/staff")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.data)) {
+          setStaff(data.data.map((s: any) => ({ id: String(s.id), name: s.name })));
+        } else {
+          setStaff([]);
+        }
+      })
+      .catch(() => {
+        setStaff([]);
+      })
+      .finally(() => setStaffLoading(false));
+  }, []);
+  
   // Helpers
   const updateFormData = <K extends keyof ClaimFormData>(field: K, value: ClaimFormData[K]) => {
     setFormData((prev) => {
@@ -303,32 +374,38 @@ export default function ClaimIntake() {
   // Submit
   const handleSubmit = async (submitType: "submit" | "submitAndAdd") => {
     if (!validateForm()) return;
-
     setIsSubmitting(true);
     try {
-      // TODO: call your API here
-      await new Promise((r) => setTimeout(r, 800));
-
-      console.log("Form submitted:", {
-        formData,
-        insuredPersons,
-        additionalContacts,
-        coverageLines,
-        submitType,
+      const res = await fetch("/api/claims/intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          formData,
+          insuredPersons,
+          additionalContacts,
+          coverageLines,
+          submitType, // optional, just for debugging on server
+        }),
       });
 
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Submission failed");
+
+      console.log("Created Claim:", json);
+
       if (submitType === "submitAndAdd") {
-        // reset but keep today’s date for received; and keep at least one insured
+        // reset but keep today's received date and one insured block (as you do now)
         setFormData({ ...initialForm, dateReceived: getCurrentDate() });
         setInsuredPersons([{ id: "1", firstName: "", lastName: "", email: "", phone: "", phone2: "" }]);
         setAdditionalContacts([]);
         setCoverageLines([{ id: "1", description: "", amount: "" }]);
         setErrors({});
       } else {
-        router.push("/dashboard");
+        router.push(`/claims/${json.claimId}`); // or your dashboard
       }
     } catch (err) {
       console.error("Submission error:", err);
+      setErrors((e) => ({ ...e, submit: String(err) }));
     } finally {
       setIsSubmitting(false);
     }
@@ -366,14 +443,15 @@ export default function ClaimIntake() {
                 <Select
                   value={formData.clientCompany}
                   onValueChange={(v) => updateFormData("clientCompany", v)}
+                  disabled={clientCompaniesLoading}
                 >
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select client company" />
+                    <SelectValue placeholder={clientCompaniesLoading ? "Loading..." : "Select client company"} />
                   </SelectTrigger>
                   <SelectContent>
                     {clientCompanies.map((company) => (
-                      <SelectItem key={company} value={company}>
-                        {company}
+                      <SelectItem key={company.id} value={company.id}>
+                        {company.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -391,20 +469,17 @@ export default function ClaimIntake() {
                 <Select
                   value={formData.clientContact}
                   onValueChange={(v) => updateFormData("clientContact", v)}
-                  disabled={!formData.clientCompany}
+                  disabled={!formData.clientCompany || clientContactsLoading}
                 >
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select client contact" />
+                    <SelectValue placeholder={clientContactsLoading ? "Loading..." : "Select client contact"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {formData.clientCompany &&
-                      clientContacts[formData.clientCompany as keyof typeof clientContacts]?.map(
-                        (contact) => (
-                          <SelectItem key={contact} value={contact}>
-                            {contact}
-                          </SelectItem>
-                        )
-                      )}
+                    {clientContacts.map((contact) => (
+                      <SelectItem key={contact} value={contact}>
+                        {contact}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -886,14 +961,15 @@ export default function ClaimIntake() {
                 <Select
                   value={formData.typeOfLoss}
                   onValueChange={(v) => updateFormData("typeOfLoss", v)}
+                  disabled={lossCausesLoading}
                 >
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select loss type" />
+                    <SelectValue placeholder={lossCausesLoading ? "Loading..." : "Select loss type"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {lossTypes.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        {type}
+                    {lossCauses.map((cause) => (
+                      <SelectItem key={cause.id} value={cause.name}>
+                        {cause.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -905,14 +981,19 @@ export default function ClaimIntake() {
                 <Select
                   value={formData.assignedManager}
                   onValueChange={(v) => updateFormData("assignedManager", v)}
+                  disabled={staffLoading}
                 >
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select manager" />
+                    <SelectValue
+                      placeholder={staffLoading ? "Loading..." : "Select manager"}
+                    >
+                      {getStaffName(formData.assignedManager, staff) || (staffLoading ? "Loading..." : "Select manager")}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {managers.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {m}
+                    {staff.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -924,14 +1005,19 @@ export default function ClaimIntake() {
                 <Select
                   value={formData.assignedAdjuster}
                   onValueChange={(v) => updateFormData("assignedAdjuster", v)}
+                  disabled={staffLoading}
                 >
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select adjuster" />
+                    <SelectValue
+                      placeholder={staffLoading ? "Loading..." : "Select adjuster"}
+                    >
+                      {getStaffName(formData.assignedAdjuster, staff) || (staffLoading ? "Loading..." : "Select adjuster")}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {adjusters.map((a) => (
-                      <SelectItem key={a} value={a}>
-                        {a}
+                    {staff.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
