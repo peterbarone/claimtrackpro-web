@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
-const DIRECTUS_URL = process.env.DIRECTUS_URL!;
+const DIRECTUS_URL = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL || '').replace(/\/+$/, '');
 const COOKIE_NAME = process.env.COOKIE_NAME || 'ctrk_jwt';
 const REFRESH_COOKIE_NAME = process.env.REFRESH_COOKIE_NAME || 'ctrk_rjwt';
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
@@ -22,14 +22,17 @@ export async function POST() {
   if (!r.ok) return NextResponse.json(data, { status: r.status });
 
   const res = NextResponse.json({ ok: true });
-  const cookieOpts = {
+  // Match login cookie attributes for consistency (localhost-friendly)
+  const secure = process.env.NODE_ENV === 'production';
+  const baseOpts = {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none' as const,
+    secure,
+    sameSite: 'lax' as const,
     path: '/',
     ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
   };
-  res.cookies.set(COOKIE_NAME, data.data.access_token, cookieOpts);
-  res.cookies.set(REFRESH_COOKIE_NAME, data.data.refresh_token, cookieOpts);
+  // Align TTLs with login route
+  res.cookies.set(COOKIE_NAME, data.data.access_token, { ...baseOpts, maxAge: 60 * 15 });
+  res.cookies.set(REFRESH_COOKIE_NAME, data.data.refresh_token, { ...baseOpts, maxAge: 60 * 60 * 24 * 30 });
   return res;
 }

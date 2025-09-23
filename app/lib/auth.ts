@@ -13,9 +13,9 @@ type Me = {
 export async function loginWithPassword(email: string, password: string) {
   console.log('Attempting Directus login with:', email);
   try {
-    const url = process.env.DIRECTUS_URL;
-    if (!url) throw new Error('DIRECTUS_URL is not set');
-    const res = await fetch(url.replace(/\/$/, '') + '/auth/login', {
+  const url = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL || '').replace(/\/+$/, '');
+  if (!url) throw new Error('DIRECTUS_URL is not set');
+  const res = await fetch(url + '/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -38,11 +38,11 @@ export async function loginWithPassword(email: string, password: string) {
 
 export async function logout() {
   try {
-    const url = process.env.DIRECTUS_URL;
-    if (!url) throw new Error('DIRECTUS_URL is not set');
+  const url = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL || '').replace(/\/+$/, '');
+  if (!url) throw new Error('DIRECTUS_URL is not set');
     const { refresh } = getTokens();
     if (refresh) {
-      await fetch(url.replace(/\/$/, '') + '/auth/logout', {
+  await fetch(url + '/auth/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refresh }),
@@ -64,9 +64,9 @@ export async function getMe(): Promise<Me | null> {
     }
     // Attempt refresh
     if (refresh) {
-      const url = process.env.DIRECTUS_URL;
-      if (!url) throw new Error('DIRECTUS_URL is not set');
-      const res = await fetch(url.replace(/\/$/, '') + '/auth/refresh', {
+  const url = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL || '').replace(/\/+$/, '');
+  if (!url) throw new Error('DIRECTUS_URL is not set');
+  const res = await fetch(url + '/auth/refresh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refresh }),

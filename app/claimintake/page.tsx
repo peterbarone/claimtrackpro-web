@@ -67,7 +67,7 @@ type PrimaryContactValue = `insured-${string}` | `contact-${string}`;
 interface ClaimFormData {
   // Assignment
   clientCompany: string;   // carrier_id
-  clientContact: string;   // optional; we’ll resolve in API
+  clientContact: string;   // optional; we'll resolve in API
   claimNumber: string;
   policyNumber: string;    // optional now
 
@@ -203,7 +203,7 @@ export default function ClaimIntake() {
   // Contact types for Additional Contacts
   const contactTypes = ["Agent", "Broker", "Tenant", "Property Manager", "Other"];
 
-  // Dynamic loss causes (we’ll store ID now)
+  // Dynamic loss causes (we'll store ID now)
   const [lossCauses, setLossCauses] = useState<{ id: string; name: string }[]>([]);
   const [lossCausesLoading, setLossCausesLoading] = useState(true);
   useEffect(() => {

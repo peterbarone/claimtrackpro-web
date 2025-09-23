@@ -8,7 +8,8 @@ export async function POST(req: Request) {
   const { email, password } = await req.json();
   console.log('Received login request:', { email });
 
-  const DIRECTUS_URL = process.env.DIRECTUS_URL;
+  // Normalize base URL to avoid double slashes when joining paths
+  const DIRECTUS_URL = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL || '').replace(/\/+$/, '');
   if (!DIRECTUS_URL) {
     console.error('Missing DIRECTUS_URL env var');
     return NextResponse.json({ error: 'Server misconfiguration: DIRECTUS_URL is not set' }, { status: 500 });

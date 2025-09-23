@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { getTokens } from "@/lib/auth-cookies";
 
-const DIRECTUS_URL = process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL;
+const DIRECTUS_URL = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL || '').replace(/\/+$/, '');
 const SERVICE_TOKEN = process.env.DIRECTUS_SERVICE_TOKEN || process.env.DIRECTUS_STATIC_TOKEN;
 const SERVICE_EMAIL = process.env.DIRECTUS_EMAIL;
 const SERVICE_PASSWORD = process.env.DIRECTUS_PASSWORD;
@@ -17,13 +17,13 @@ async function dx(path: string, init?: RequestInit) {
   };
   const doFetch = async (bearer?: string) => {
     const auth = bearer ? { Authorization: `Bearer ${bearer}` } : {};
-    return fetch(`${DIRECTUS_URL}${path}`, { ...init, headers: { ...headers, ...auth } });
+  return fetch(`${DIRECTUS_URL}${path}`, { ...init, headers: { ...headers, ...auth } });
   };
 
   let res = await doFetch();
   if (res.status === 401 && SERVICE_EMAIL && SERVICE_PASSWORD) {
     try {
-      const loginRes = await fetch(`${DIRECTUS_URL}/auth/login`, {
+  const loginRes = await fetch(`${DIRECTUS_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: SERVICE_EMAIL, password: SERVICE_PASSWORD })

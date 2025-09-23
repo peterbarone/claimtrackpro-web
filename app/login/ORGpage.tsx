@@ -79,7 +79,7 @@ function LoginPageInner() {
           disabled={submitting}
           className="w-full rounded-xl bg-gray-900 text-white py-2 disabled:opacity-50"
         >
-          {submitting ? "Signing in…" : "Sign in"}
+          {submitting ? "Signing in..." : "Sign in"}
         </button>
       </form>
     </div>

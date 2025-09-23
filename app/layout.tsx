@@ -15,7 +15,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   // Next.js App Router doesn't give pathname here directly,
-  // so we’ll use a client component wrapper for the conditional header.
+  // so we'll use a client component wrapper for the conditional header.
   return (
     <html lang="en">
       <body className="min-h-screen flex flex-col">

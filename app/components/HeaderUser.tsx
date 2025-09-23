@@ -10,7 +10,7 @@ export function HeaderUser() {
     <div className="flex items-center gap-3">
       <span className="text-sm text-gray-700">
         {loading
-          ? "Loading…"
+          ? "Loading..."
           : user
           ? `Welcome, ${user.first_name ?? user.email ?? "User"}`
           : "Not signed in"}

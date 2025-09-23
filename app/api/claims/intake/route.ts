@@ -18,7 +18,7 @@ import { randomUUID } from "crypto";
       deductible: deductible ? parseFloat(deductible) : null,ICE_TOKEN (optional): static token for server-side writes (role-scoped)
  * - COOKIE_NAME:         name of the JWT cookie if you’re using user session auth (default "ctrk_jwt")
  */
-const DIRECTUS_URL = process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL!;
+const DIRECTUS_URL = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL || '').replace(/\/+$/, '');
 const COOKIE_NAME = process.env.COOKIE_NAME || "ctrk_jwt";
 const SERVICE_TOKEN = process.env.DIRECTUS_SERVICE_TOKEN || process.env.DIRECTUS_STATIC_TOKEN;
 const SERVICE_EMAIL = process.env.DIRECTUS_EMAIL;
@@ -200,8 +200,19 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // Preflight ping (non-blocking): helpful for logs, don't block submissions
-    directusRequest<any>(`/server/ping`, { method: "GET" })
-      .then((pong) => console.log("Directus ping:", pong))
+    // Use a raw fetch because /server/ping returns plain text ("pong"), not JSON
+    fetch(`${DIRECTUS_URL}/server/ping`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "text/plain",
+        ...(SERVICE_TOKEN ? { Authorization: `Bearer ${SERVICE_TOKEN}` } : {}),
+      },
+      cache: "no-store",
+    })
+      .then(async (r) => {
+        const t = await r.text().catch(() => "");
+        console.log("Directus ping:", t || r.status);
+      })
       .catch((e: any) => console.warn("Directus ping failed:", e?.message || e));
 
     const {

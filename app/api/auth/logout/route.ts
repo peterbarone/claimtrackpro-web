@@ -6,10 +6,11 @@ const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
 
 export async function POST() {
   const res = NextResponse.json({ ok: true });
+  const secure = process.env.NODE_ENV === 'production';
   const expired = {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none' as const,
+    secure,
+    sameSite: 'lax' as const,
     path: '/',
     maxAge: 0,
     ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),

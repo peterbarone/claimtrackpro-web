@@ -8,7 +8,7 @@ export default async function directusFetch(
   const url = process.env.DIRECTUS_URL;
   if (!url) throw new Error('DIRECTUS_URL is not set');
 
-  const fullUrl = url.replace(/\/$/, '') + path;
+  const fullUrl = url.replace(/\/+$/, '') + path;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 

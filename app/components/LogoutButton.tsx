@@ -24,7 +24,7 @@ export function LogoutButton() {
       disabled={loading}
       className="rounded-xl border px-3 py-1 hover:bg-gray-100 disabled:opacity-50"
     >
-      {loading ? "Logging out…" : "Logout"}
+      {loading ? "Logging out..." : "Logout"}
     </button>
   );
 }

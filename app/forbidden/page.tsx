@@ -25,7 +25,7 @@ export default function ForbiddenPage() {
 
         <h1 className="text-2xl font-semibold">Access denied</h1>
         <p className="text-sm text-gray-600">
-          You don’t have permission to view this page. If you believe this is an
+          You don't have permission to view this page. If you believe this is an
           error, contact an admin.
         </p>
 
@@ -44,7 +44,7 @@ export default function ForbiddenPage() {
           </Link>
         </div>
 
-        {/* Optional “request access” mailto */}
+  {/* Optional "request access" mailto */}
         <div className="pt-2 text-xs text-gray-500">
           Need access?{" "}
           <a

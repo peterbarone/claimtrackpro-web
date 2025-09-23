@@ -88,7 +88,7 @@ export default async function ClaimDetailPage({
           <p>
             {typeof claim.status === "number"
               ? STATUS_LABEL[claim.status] ?? claim.status
-              : "—"}
+              : "-"}
           </p>
         </div>
         <div>
@@ -96,7 +96,7 @@ export default async function ClaimDetailPage({
           <p>
             {claim.date_of_loss
               ? new Date(claim.date_of_loss).toLocaleDateString()
-              : "—"}
+              : "-"}
           </p>
         </div>
         <div>
@@ -104,16 +104,16 @@ export default async function ClaimDetailPage({
           <p>
             {claim.reported_date
               ? new Date(claim.reported_date).toLocaleDateString()
-              : "—"}
+              : "-"}
           </p>
         </div>
         <div>
           <p className="font-medium">Assigned To</p>
-          <p>{claim.assigned_to_user ?? "—"}</p>
+          <p>{claim.assigned_to_user ?? "-"}</p>
         </div>
         <div className="md:col-span-2">
           <p className="font-medium">Description</p>
-          <p>{claim.description ?? "—"}</p>
+          <p>{claim.description ?? "-"}</p>
         </div>
       </div>
     </div>
