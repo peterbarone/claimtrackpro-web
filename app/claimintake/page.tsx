@@ -387,7 +387,12 @@ export default function ClaimIntake() {
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "Submission failed");
+      if (!res.ok) {
+        const message = json?.detail
+          ? `${json?.error ?? "Submission failed"}: ${json.detail}`
+          : (json?.error || "Submission failed");
+        throw new Error(message);
+      }
 
       if (submitType === "submitAndAdd") {
         setFormData({ ...initialForm, dateReceived: getCurrentDate() });

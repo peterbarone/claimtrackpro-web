@@ -19,7 +19,9 @@ import { cookies, headers } from "next/headers";
  */
 const DIRECTUS_URL = process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL!;
 const COOKIE_NAME = process.env.COOKIE_NAME || "ctrk_jwt";
-const SERVICE_TOKEN = process.env.DIRECTUS_SERVICE_TOKEN;
+const SERVICE_TOKEN = process.env.DIRECTUS_SERVICE_TOKEN || process.env.DIRECTUS_STATIC_TOKEN;
+const SERVICE_EMAIL = process.env.DIRECTUS_EMAIL;
+const SERVICE_PASSWORD = process.env.DIRECTUS_PASSWORD;
 
 /**
  * Helper: determine Secure cookies only when https and not localhost
@@ -41,22 +43,54 @@ async function directusRequest<T>(
   init?: RequestInit,
   explicitToken?: string | null
 ): Promise<T> {
+  // For claim intake, prefer service token for server-side operations
   const tokenFromCookie = cookies().get(COOKIE_NAME)?.value;
-  const token = explicitToken ?? tokenFromCookie ?? SERVICE_TOKEN;
+  let token = explicitToken ?? SERVICE_TOKEN ?? tokenFromCookie;
+  const tokenPreview = token ? `${String(token).slice(0, 6)}…` : "missing";
+  const cookiePreview = tokenFromCookie ? `${String(tokenFromCookie).slice(0, 6)}…` : "missing";
+  console.log("Directus auth: cookie:", cookiePreview, "service:", SERVICE_TOKEN ? "present" : "missing", "using:", tokenPreview);
+  
   if (!token) throw new Error("Missing authentication token for Directus");
+  // Helper to perform fetch with the provided token
+  const doFetch = async (bearer: string) => {
+    const res = await fetch(`${DIRECTUS_URL}${path}`, {
+      ...init,
+      headers: {
+        ...(init?.headers || {}),
+        Authorization: `Bearer ${bearer}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    });
+    return res;
+  };
 
-  const res = await fetch(`${DIRECTUS_URL}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.headers || {}),
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    cache: "no-store",
-  });
+  let res = await doFetch(token);
+
+  // If unauthorized and we have service account creds, try to login and retry once
+  if (res.status === 401 && SERVICE_EMAIL && SERVICE_PASSWORD) {
+    try {
+      const loginRes = await fetch(`${DIRECTUS_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: SERVICE_EMAIL, password: SERVICE_PASSWORD })
+      });
+      const loginJson = await loginRes.json().catch(() => ({}));
+      if (loginRes.ok && loginJson?.data?.access_token) {
+        token = loginJson.data.access_token as string;
+        console.warn("Directus service login succeeded; retrying request.");
+        res = await doFetch(token);
+      } else {
+        console.error("Directus service login failed:", loginRes.status, loginJson);
+      }
+    } catch (e: any) {
+      console.error("Directus service login threw:", e?.message || e);
+    }
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    console.error(`Directus error for ${path}:`, res.status, res.statusText, text);
     throw new Error(`Directus ${res.status} ${res.statusText} at ${path}: ${text}`);
   }
   return res.json() as Promise<T>;
@@ -164,6 +198,11 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
+    // Preflight ping (non-blocking): helpful for logs, don't block submissions
+    directusRequest<any>(`/server/ping`, { method: "GET" })
+      .then((pong) => console.log("Directus ping:", pong))
+      .catch((e: any) => console.warn("Directus ping failed:", e?.message || e));
+
     const {
       formData,
       insuredPersons = [],
@@ -262,7 +301,7 @@ export async function POST(req: Request) {
       date_received: dateReceived || null,
 
       assigned_to_user: assignedAdjusterId || null, // staff.id
-      deductible: deductible || null,
+      deductible: deductible ? parseFloat(deductible) : null,
       description: description || null,
     };
 
