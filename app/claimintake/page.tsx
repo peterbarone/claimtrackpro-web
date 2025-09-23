@@ -17,7 +17,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 
-// Lucide: import real names and alias to *Icon for your JSX
 import {
   Plus as PlusIcon,
   X as XIcon,
@@ -35,8 +34,11 @@ type Address = {
   zip: string;
 };
 
+// ✅ Added business support + orgName
 interface InsuredPerson {
   id: string;
+  isBusiness?: boolean;
+  orgName?: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -64,12 +66,12 @@ type PrimaryContactValue = `insured-${string}` | `contact-${string}`;
 
 interface ClaimFormData {
   // Assignment
-  clientCompany: string;
-  clientContact: string;
+  clientCompany: string;   // carrier_id
+  clientContact: string;   // optional; we’ll resolve in API
   claimNumber: string;
-  policyNumber: string;
+  policyNumber: string;    // optional now
 
-  // Addresses
+  // Addresses (Loss/Property + Mailing)
   propertyAddress: Address;
   mailingAddress: Address;
   sameAsProperty: boolean;
@@ -78,12 +80,12 @@ interface ClaimFormData {
   // Loss
   dateOfLoss: string;
   dateReceived: string;
-  typeOfLoss: string;
+  typeOfLoss: string;      // will hold loss_cause.id (string)
   lossDescription: string;
-  assignedManager: string;
-  assignedAdjuster: string;
+  assignedManager: string;   // your UI keeps both
+  assignedAdjuster: string;  // API will map this to claims.assigned_to_user
 
-  // Policy
+  // Policy (optional block)
   effectiveDate: string;
   expirationDate: string;
   policyType: string;
@@ -93,7 +95,6 @@ interface ClaimFormData {
 
 export default function ClaimIntake() {
   const router = useRouter();
-
   const getCurrentDate = () => new Date().toISOString().split("T")[0];
 
   const initialForm: ClaimFormData = {
@@ -109,7 +110,7 @@ export default function ClaimIntake() {
 
     dateOfLoss: "",
     dateReceived: getCurrentDate(),
-    typeOfLoss: "",
+    typeOfLoss: "",        // will store ID string
     lossDescription: "",
     assignedManager: "",
     assignedAdjuster: "",
@@ -129,13 +130,12 @@ export default function ClaimIntake() {
     return found ? found.name : "";
   };
 
+  // ✅ Add business fields into InsuredPerson shape
   const [insuredPersons, setInsuredPersons] = useState<InsuredPerson[]>([
-    { id: "1", firstName: "", lastName: "", email: "", phone: "", phone2: "" },
+    { id: "1", isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "" },
   ]);
 
-  const [additionalContacts, setAdditionalContacts] = useState<
-    AdditionalContact[]
-  >([]);
+  const [additionalContacts, setAdditionalContacts] = useState<AdditionalContact[]>([]);
   const [coverageLines, setCoverageLines] = useState<CoverageLine[]>([
     { id: "1", description: "", amount: "" },
   ]);
@@ -150,7 +150,6 @@ export default function ClaimIntake() {
     }, 2000);
     return () => clearTimeout(timer);
   }, [formData, insuredPersons, additionalContacts, coverageLines]);
-
 
   // Dynamic client companies (Carriers)
   const [clientCompanies, setClientCompanies] = useState<{ id: string; name: string }[]>([]);
@@ -171,7 +170,7 @@ export default function ClaimIntake() {
   }, []);
 
   // Dynamic client contacts (per carrier)
-  const [clientContacts, setClientContacts] = useState<string[]>([]);
+  const [clientContacts, setClientContacts] = useState<{ id: string; label: string }[]>([]);
   const [clientContactsLoading, setClientContactsLoading] = useState(false);
   useEffect(() => {
     if (!formData.clientCompany) {
@@ -183,7 +182,12 @@ export default function ClaimIntake() {
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data.data)) {
-          setClientContacts(data.data.map((c: any) => c.name || c.full_name || c.email || ""));
+          setClientContacts(
+            data.data.map((c: any) => ({
+              id: String(c.id ?? c.email ?? c.name ?? ""),
+              label: c.name || c.full_name || c.email || "",
+            }))
+          );
         } else {
           setClientContacts([]);
         }
@@ -197,15 +201,9 @@ export default function ClaimIntake() {
   ];
 
   // Contact types for Additional Contacts
-  const contactTypes = [
-    "Agent",
-    "Broker",
-    "Tenant",
-    "Property Manager",
-    "Other",
-  ];
+  const contactTypes = ["Agent", "Broker", "Tenant", "Property Manager", "Other"];
 
-  // Dynamic loss causes
+  // Dynamic loss causes (we’ll store ID now)
   const [lossCauses, setLossCauses] = useState<{ id: string; name: string }[]>([]);
   const [lossCausesLoading, setLossCausesLoading] = useState(true);
   useEffect(() => {
@@ -214,7 +212,7 @@ export default function ClaimIntake() {
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data.data)) {
-          setLossCauses(data.data.map((c) => ({ id: String(c.id), name: c.name })));
+          setLossCauses(data.data.map((c: any) => ({ id: String(c.id), name: c.name })));
         } else {
           setLossCauses([]);
         }
@@ -223,7 +221,7 @@ export default function ClaimIntake() {
       .finally(() => setLossCausesLoading(false));
   }, []);
 
-  // Dynamic managers and adjusters (all staff, no roles)
+  // Dynamic managers/adjusters (all staff; UI keeps both)
   const [staff, setStaff] = useState<{ id: string; name: string }[]>([]);
   const [staffLoading, setStaffLoading] = useState(true);
   useEffect(() => {
@@ -237,18 +235,14 @@ export default function ClaimIntake() {
           setStaff([]);
         }
       })
-      .catch(() => {
-        setStaff([]);
-      })
+      .catch(() => setStaff([]))
       .finally(() => setStaffLoading(false));
   }, []);
-  
+
   // Helpers
   const updateFormData = <K extends keyof ClaimFormData>(field: K, value: ClaimFormData[K]) => {
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
-
-      // Auto-calc expiration when effectiveDate set
       if (field === "effectiveDate" && typeof value === "string" && value) {
         const effectiveDate = new Date(value);
         const expirationDate = new Date(effectiveDate);
@@ -286,14 +280,13 @@ export default function ClaimIntake() {
     const newId = (insuredPersons.length + 1).toString();
     setInsuredPersons((prev) => [
       ...prev,
-      { id: newId, firstName: "", lastName: "", email: "", phone: "", phone2: "" },
+      { id: newId, isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "" },
     ]);
   };
 
   const removeInsuredPerson = (id: string) => {
     if (insuredPersons.length > 1) {
       setInsuredPersons((prev) => prev.filter((p) => p.id !== id));
-      // If primaryContact pointed to the removed person, reset to insured-1
       setFormData((prev) =>
         prev.primaryContact === (`insured-${id}` as PrimaryContactValue)
           ? { ...prev, primaryContact: "insured-1" }
@@ -302,7 +295,7 @@ export default function ClaimIntake() {
     }
   };
 
-  const updateInsuredPerson = (id: string, field: keyof InsuredPerson, value: string) => {
+  const updateInsuredPerson = (id: string, field: keyof InsuredPerson, value: any) => {
     setInsuredPersons((prev) =>
       prev.map((p) => (p.id === id ? { ...p, [field]: value } : p))
     );
@@ -326,18 +319,15 @@ export default function ClaimIntake() {
     );
   };
 
-  const updateAdditionalContact = (
-    id: string,
-    field: keyof AdditionalContact,
-    value: string
-  ) => {
+  const updateAdditionalContact = (id: string, field: keyof AdditionalContact, value: string) => {
     setAdditionalContacts((prev) =>
       prev.map((c) => (c.id === id ? { ...c, [field]: value } : c))
     );
   };
 
-  // Coverage lines
+  // Coverage lines (cap at 8)
   const addCoverageLine = () => {
+    if (coverageLines.length >= 8) return;
     const newId = (coverageLines.length + 1).toString();
     setCoverageLines((prev) => [...prev, { id: newId, description: "", amount: "" }]);
   };
@@ -352,14 +342,22 @@ export default function ClaimIntake() {
     setCoverageLines((prev) => prev.map((l) => (l.id === id ? { ...l, [field]: value } : l)));
   };
 
-  // Validation
+  // Validation (Policy Number now optional)
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
     if (!formData.clientCompany) newErrors.clientCompany = "Client Company is required";
     if (!formData.claimNumber) newErrors.claimNumber = "Claim Number is required";
-    if (!formData.policyNumber) newErrors.policyNumber = "Policy Number is required";
-    if (!insuredPersons[0].firstName) newErrors.insuredFirstName = "Insured First Name is required";
-    if (!insuredPersons[0].lastName) newErrors.insuredLastName = "Insured Last Name is required";
+    // Policy number is OPTIONAL now
+
+    if (!insuredPersons[0].firstName && !insuredPersons[0].isBusiness) {
+      newErrors.insuredFirstName = "Insured First Name is required (or mark as business)";
+    }
+    if (!insuredPersons[0].lastName && !insuredPersons[0].isBusiness) {
+      newErrors.insuredLastName = "Insured Last Name is required (or mark as business)";
+    }
+    if (insuredPersons[0].isBusiness && !insuredPersons[0].orgName) {
+      newErrors.insuredOrg = "Organization Name is required for business insured";
+    }
 
     insuredPersons.forEach((p, idx) => {
       if (p.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) {
@@ -384,24 +382,21 @@ export default function ClaimIntake() {
           insuredPersons,
           additionalContacts,
           coverageLines,
-          submitType, // optional, just for debugging on server
+          submitType,
         }),
       });
 
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Submission failed");
 
-      console.log("Created Claim:", json);
-
       if (submitType === "submitAndAdd") {
-        // reset but keep today's received date and one insured block (as you do now)
         setFormData({ ...initialForm, dateReceived: getCurrentDate() });
-        setInsuredPersons([{ id: "1", firstName: "", lastName: "", email: "", phone: "", phone2: "" }]);
+        setInsuredPersons([{ id: "1", isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "" }]);
         setAdditionalContacts([]);
         setCoverageLines([{ id: "1", description: "", amount: "" }]);
         setErrors({});
       } else {
-        router.push(`/claims/${json.claimId}`); // or your dashboard
+        router.push(`/claims/${json.claimId}`);
       }
     } catch (err) {
       console.error("Submission error:", err);
@@ -475,9 +470,9 @@ export default function ClaimIntake() {
                     <SelectValue placeholder={clientContactsLoading ? "Loading..." : "Select client contact"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {clientContacts.map((contact) => (
-                      <SelectItem key={contact} value={contact}>
-                        {contact}
+                    {clientContacts.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -501,34 +496,44 @@ export default function ClaimIntake() {
                 )}
               </div>
 
-              {/* Policy Number */}
+              {/* Policy Number (optional) */}
               <div className="space-y-2">
                 <Label htmlFor="policyNumber" className="text-sm font-medium">
-                  Policy Number *
+                  Policy Number
                 </Label>
                 <Input
                   id="policyNumber"
                   value={formData.policyNumber}
                   onChange={(e) => updateFormData("policyNumber", e.target.value)}
                   className="h-11"
-                  placeholder="Enter policy number"
+                  placeholder="Enter policy number (optional)"
                 />
-                {errors.policyNumber && (
-                  <p className="text-sm text-red-600">{errors.policyNumber}</p>
-                )}
               </div>
             </div>
 
             {/* Insured Persons */}
             <div className="space-y-4">
-              <h4 className="text-lg font-medium text-gray-900">Insured Persons</h4>
+              <h4 className="text-lg font-medium text-gray-900">Insured</h4>
 
               {insuredPersons.map((person, index) => (
                 <div key={person.id} className="border rounded-lg p-4 space-y-4">
                   <div className="flex items-center justify-between">
-                    <h5 className="font-medium text-gray-900">
-                      {index === 0 ? "Primary Insured" : `Additional Insured ${index}`}
-                    </h5>
+                    <div className="flex items-center gap-3">
+                      <h5 className="font-medium text-gray-900">
+                        {index === 0 ? "Primary Insured" : `Additional Insured ${index}`}
+                      </h5>
+                      {/* ✅ Business toggle */}
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={`isBusiness-${person.id}`}
+                          checked={!!person.isBusiness}
+                          onCheckedChange={(v) => updateInsuredPerson(person.id, "isBusiness", v === true)}
+                        />
+                        <Label htmlFor={`isBusiness-${person.id}`} className="text-sm">
+                          Insured is a business
+                        </Label>
+                      </div>
+                    </div>
                     {index > 0 && (
                       <Button
                         type="button"
@@ -542,10 +547,28 @@ export default function ClaimIntake() {
                     )}
                   </div>
 
+                  {/* Organization name if business */}
+                  {person.isBusiness && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div className="space-y-2 md:col-span-2">
+                        <Label className="text-sm font-medium">Organization Name *</Label>
+                        <Input
+                          value={person.orgName || ""}
+                          onChange={(e) => updateInsuredPerson(person.id, "orgName", e.target.value)}
+                          className="h-11"
+                          placeholder="Enter organization name"
+                        />
+                        {index === 0 && errors.insuredOrg && (
+                          <p className="text-sm text-red-600">{errors.insuredOrg}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label className="text-sm font-medium">
-                        First Name {index === 0 && "*"}
+                        First Name {index === 0 && !person.isBusiness && "*"}
                       </Label>
                       <Input
                         value={person.firstName}
@@ -554,15 +577,16 @@ export default function ClaimIntake() {
                         }
                         className="h-11"
                         placeholder="Enter first name"
+                        disabled={!!person.isBusiness}
                       />
-                      {index === 0 && errors.insuredFirstName && (
+                      {index === 0 && !person.isBusiness && errors.insuredFirstName && (
                         <p className="text-sm text-red-600">{errors.insuredFirstName}</p>
                       )}
                     </div>
 
                     <div className="space-y-2">
                       <Label className="text-sm font-medium">
-                        Last Name {index === 0 && "*"}
+                        Last Name {index === 0 && !person.isBusiness && "*"}
                       </Label>
                       <Input
                         value={person.lastName}
@@ -571,8 +595,9 @@ export default function ClaimIntake() {
                         }
                         className="h-11"
                         placeholder="Enter last name"
+                        disabled={!!person.isBusiness}
                       />
-                      {index === 0 && errors.insuredLastName && (
+                      {index === 0 && !person.isBusiness && errors.insuredLastName && (
                         <p className="text-sm text-red-600">{errors.insuredLastName}</p>
                       )}
                     </div>
@@ -632,18 +657,18 @@ export default function ClaimIntake() {
           </CardContent>
         </Card>
 
-        {/* Property Information */}
+        {/* Loss / Property Information */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <MapPinIcon className="h-5 w-5 text-[#92C4D5]" />
-              <span>Property Information</span>
+              <span>Loss & Property Information</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Property Address */}
+            {/* Loss Address (formerly Property Address) */}
             <div className="space-y-4">
-              <h4 className="text-lg font-medium text-gray-900">Property Address</h4>
+              <h4 className="text-lg font-medium text-gray-900">Loss Address</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="md:col-span-2 space-y-2">
                   <Label className="text-sm font-medium">Street Address 1</Label>
@@ -717,7 +742,7 @@ export default function ClaimIntake() {
                     onCheckedChange={handleSameAsProperty}
                   />
                   <Label htmlFor="sameAsProperty" className="text-sm">
-                    Same as Property Address
+                    Same as Loss Address
                   </Label>
                 </div>
               </div>
@@ -910,7 +935,9 @@ export default function ClaimIntake() {
                     <SelectContent>
                       {insuredPersons.map((person, index) => (
                         <SelectItem key={`insured-${person.id}`} value={`insured-${person.id}`}>
-                          {person.firstName} {person.lastName} {index === 0 ? "(Primary Insured)" : ""}
+                          {person.isBusiness
+                            ? `${person.orgName || "Business"}`
+                            : `${person.firstName} ${person.lastName}`} {index === 0 ? "(Primary Insured)" : ""}
                         </SelectItem>
                       ))}
                       {additionalContacts.map((contact) => (
@@ -960,7 +987,7 @@ export default function ClaimIntake() {
                 <Label className="text-sm font-medium">Type of Loss</Label>
                 <Select
                   value={formData.typeOfLoss}
-                  onValueChange={(v) => updateFormData("typeOfLoss", v)}
+                  onValueChange={(v) => updateFormData("typeOfLoss", v)} // v is ID now
                   disabled={lossCausesLoading}
                 >
                   <SelectTrigger className="h-11">
@@ -968,7 +995,7 @@ export default function ClaimIntake() {
                   </SelectTrigger>
                   <SelectContent>
                     {lossCauses.map((cause) => (
-                      <SelectItem key={cause.id} value={cause.name}>
+                      <SelectItem key={cause.id} value={cause.id}>
                         {cause.name}
                       </SelectItem>
                     ))}
@@ -1037,132 +1064,134 @@ export default function ClaimIntake() {
           </CardContent>
         </Card>
 
-        {/* Policy Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <BuildingIcon className="h-5 w-5 text-[#92C4D5]" />
-              <span>Policy Information</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Effective Date</Label>
-                <Input
-                  type="date"
-                  value={formData.effectiveDate}
-                  onChange={(e) => updateFormData("effectiveDate", e.target.value)}
-                  className="h-11"
-                />
+        {/* Policy Information (shown only if a policy number is provided) */}
+        {formData.policyNumber.trim() && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <BuildingIcon className="h-5 w-5 text-[#92C4D5]" />
+                <span>Policy Information</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Effective Date</Label>
+                  <Input
+                    type="date"
+                    value={formData.effectiveDate}
+                    onChange={(e) => updateFormData("effectiveDate", e.target.value)}
+                    className="h-11"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Expiration Date</Label>
+                  <Input
+                    type="date"
+                    value={formData.expirationDate}
+                    onChange={(e) => updateFormData("expirationDate", e.target.value)}
+                    className="h-11"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Policy Type</Label>
+                  <Select
+                    value={formData.policyType}
+                    onValueChange={(v) => updateFormData("policyType", v)}
+                  >
+                    <SelectTrigger className="h-11">
+                      <SelectValue placeholder="Select policy type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Homeowner">Homeowner</SelectItem>
+                      <SelectItem value="Commercial">Commercial</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Form Numbers</Label>
+                  <Input
+                    value={formData.formNumbers}
+                    onChange={(e) => updateFormData("formNumbers", e.target.value)}
+                    className="h-11"
+                    placeholder="Enter form numbers"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Deductible</Label>
+                  <Input
+                    value={formData.deductible}
+                    onChange={(e) => updateFormData("deductible", e.target.value)}
+                    className="h-11"
+                    placeholder="$0.00"
+                  />
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Expiration Date</Label>
-                <Input
-                  type="date"
-                  value={formData.expirationDate}
-                  onChange={(e) => updateFormData("expirationDate", e.target.value)}
-                  className="h-11"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Policy Type</Label>
-                <Select
-                  value={formData.policyType}
-                  onValueChange={(v) => updateFormData("policyType", v)}
-                >
-                  <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select policy type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Homeowner">Homeowner</SelectItem>
-                    <SelectItem value="Commercial">Commercial</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Form Numbers</Label>
-                <Input
-                  value={formData.formNumbers}
-                  onChange={(e) => updateFormData("formNumbers", e.target.value)}
-                  className="h-11"
-                  placeholder="Enter form numbers"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Deductible</Label>
-                <Input
-                  value={formData.deductible}
-                  onChange={(e) => updateFormData("deductible", e.target.value)}
-                  className="h-11"
-                  placeholder="$0.00"
-                />
-              </div>
-            </div>
-
-            {/* Coverage Lines */}
-            <div className="space-y-4">
-              <h4 className="text-lg font-medium text-gray-900">Coverage Lines</h4>
-
+              {/* Coverage Lines (max 8) */}
               <div className="space-y-4">
-                {coverageLines.map((line, index) => (
-                  <div key={line.id} className="grid grid-cols-12 gap-4 items-end">
-                    <div className="col-span-12 md:col-span-5 space-y-2">
-                      <Label className="text-sm font-medium">Description</Label>
-                      <Input
-                        value={line.description}
-                        onChange={(e) => updateCoverageLine(line.id, "description", e.target.value)}
-                        className="h-11"
-                        placeholder="Enter coverage description"
-                      />
-                    </div>
+                <h4 className="text-lg font-medium text-gray-900">Coverage Lines</h4>
 
-                    <div className="col-span-12 md:col-span-5 space-y-2">
-                      <Label className="text-sm font-medium">Amount</Label>
-                      <Input
-                        value={line.amount}
-                        onChange={(e) => updateCoverageLine(line.id, "amount", e.target.value)}
-                        className="h-11"
-                        placeholder="$0.00"
-                      />
-                    </div>
+                <div className="space-y-4">
+                  {coverageLines.map((line, index) => (
+                    <div key={line.id} className="grid grid-cols-12 gap-4 items-end">
+                      <div className="col-span-12 md:col-span-5 space-y-2">
+                        <Label className="text-sm font-medium">Description</Label>
+                        <Input
+                          value={line.description}
+                          onChange={(e) => updateCoverageLine(line.id, "description", e.target.value)}
+                          className="h-11"
+                          placeholder="Enter coverage description"
+                        />
+                      </div>
 
-                    <div className="col-span-12 md:col-span-2 flex justify-end items-center">
-                      {coverageLines.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeCoverageLine(line.id)}
-                          className="text-red-600 hover:text-red-700 h-11 w-11 p-0"
-                        >
-                          <XIcon className="h-4 w-4" />
-                        </Button>
-                      )}
+                      <div className="col-span-12 md:col-span-5 space-y-2">
+                        <Label className="text-sm font-medium">Amount</Label>
+                        <Input
+                          value={line.amount}
+                          onChange={(e) => updateCoverageLine(line.id, "amount", e.target.value)}
+                          className="h-11"
+                          placeholder="$0.00"
+                        />
+                      </div>
 
-                      {index === coverageLines.length - 1 && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={addCoverageLine}
-                          className="h-9 ml-2"
-                        >
-                          <PlusIcon className="h-4 w-4 mr-1" />
-                          Add Coverage
-                        </Button>
-                      )}
+                      <div className="col-span-12 md:col-span-2 flex justify-end items-center">
+                        {coverageLines.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeCoverageLine(line.id)}
+                            className="text-red-600 hover:text-red-700 h-11 w-11 p-0"
+                          >
+                            <XIcon className="h-4 w-4" />
+                          </Button>
+                        )}
+
+                        {index === coverageLines.length - 1 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={addCoverageLine}
+                            className="h-9 ml-2"
+                          >
+                            <PlusIcon className="h-4 w-4 mr-1" />
+                            Add Coverage
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Actions */}
         <div className="flex items-center justify-end space-x-4 pt-6 border-t">

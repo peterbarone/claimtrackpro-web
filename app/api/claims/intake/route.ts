@@ -1,308 +1,327 @@
 // app/api/claims/intake/route.ts
+export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { randomUUID } from "crypto";
-import { getTokens } from "@/lib/auth-cookies";
+import { cookies, headers } from "next/headers";
 
+/**
+ * CONFIG
+ * - DIRECTUS_URL:        https://your-directus.domain
+ * - DIR      loss_location: lossAddressId,
+      mailing_address: mailingAddressId,
 
-const DIRECTUS_URL = process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL;
-// Use end-user access token from cookies
-function dx(path: string, init?: RequestInit) {
-  if (!DIRECTUS_URL) throw new Error("Missing DIRECTUS_URL");
-  const { access } = getTokens();
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    ...(access ? { Authorization: `Bearer ${access}` } : {}),
-    ...(init?.headers || {}),
-  };
-  return fetch(`${DIRECTUS_URL}${path}`, { ...init, headers });
+      date_of_loss: dateOfLoss || null,
+      date_received: dateReceived || null,
+
+      assigned_to_user: assignedAdjusterId || null,
+      deductible: deductible ? parseFloat(deductible) : null,ICE_TOKEN (optional): static token for server-side writes (role-scoped)
+ * - COOKIE_NAME:         name of the JWT cookie if you’re using user session auth (default "ctrk_jwt")
+ */
+const DIRECTUS_URL = process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL!;
+const COOKIE_NAME = process.env.COOKIE_NAME || "ctrk_jwt";
+const SERVICE_TOKEN = process.env.DIRECTUS_SERVICE_TOKEN;
+
+/**
+ * Helper: determine Secure cookies only when https and not localhost
+ */
+function getSecureFlag() {
+  const h = headers();
+  const proto = h.get("x-forwarded-proto") ?? "http";
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  return proto === "https" && !isLocal;
 }
 
-async function upsertLookupByName(collection: "loss_cause" | "claim_type" | "claim_status", name: string) {
-  if (!name) return null;
-  const res = await dx(`/items/${collection}?filter[name][_eq]=${encodeURIComponent(name)}&limit=1`, { cache: "no-store" });
-  const data = await res.json();
-  if (data?.data?.[0]) return data.data[0].id;
-  const create = await dx(`/items/${collection}`, {
-    method: "POST",
-    body: JSON.stringify({ name, sort: 100 }),
+/**
+ * directusRequest
+ * Uses user JWT (cookie) if present; otherwise falls back to DIRECTUS_SERVICE_TOKEN if provided.
+ */
+async function directusRequest<T>(
+  path: string,
+  init?: RequestInit,
+  explicitToken?: string | null
+): Promise<T> {
+  const tokenFromCookie = cookies().get(COOKIE_NAME)?.value;
+  const token = explicitToken ?? tokenFromCookie ?? SERVICE_TOKEN;
+  if (!token) throw new Error("Missing authentication token for Directus");
+
+  const res = await fetch(`${DIRECTUS_URL}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.headers || {}),
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    cache: "no-store",
   });
-  const created = await create.json();
-  return created?.data?.id ?? null;
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Directus ${res.status} ${res.statusText} at ${path}: ${text}`);
+  }
+  return res.json() as Promise<T>;
 }
 
+/**
+ * Helpers to create common rows
+ */
 type AddressInput = {
-  street1: string; street2: string; city: string; state: string; zip: string;
+  street1?: string; street2?: string; city?: string; state?: string; zip?: string;
 };
 
-async function createAddress(a: AddressInput) {
-  if (!a || (!a.street1 && !a.city && !a.state && !a.zip)) return null; // nothing provided
-  const id = randomUUID();
-  const body = {
-    id,
-    label: "Address",
-    street_1: a.street1 || null,
-    street_2: a.street2 || null,
+async function createAddressOrNull(a?: AddressInput) {
+  if (!a) return null;
+  const hasAny =
+    (a.street1 && a.street1.trim()) ||
+    (a.city && a.city.trim()) ||
+    (a.state && a.state.trim()) ||
+    (a.zip && a.zip.trim());
+  if (!hasAny) return null;
+
+  const payload = {
+    street: a.street1 || null,
     city: a.city || null,
     state: a.state || null,
-    postal_code: a.zip || null,
+    zip_code: a.zip || null,
+    country: "USA",
   };
-  const res = await dx(`/items/addresses`, { method: "POST", body: JSON.stringify(body) });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Address create failed: ${JSON.stringify(json)}`);
-  return id;
+
+  const { data } = await directusRequest<{ data: { id: string } }>(
+    `/items/addresses`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+  return data?.id ?? null;
 }
 
-type PersonInput = {
-  firstName: string; lastName: string; email?: string; phone?: string; phone2?: string;
+type InsuredInput = {
+  isBusiness?: boolean;
+  orgName?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  phone2?: string;
 };
 
-async function createInsured(person: PersonInput, mailingAddressId: string | null) {
-  const id = randomUUID();
-  const body = {
-    id,
-    type: "person",
+async function createInsured(p: InsuredInput, mailingAddressId: string | null) {
+  const payload = {
+    first_name: p.firstName || null,
+    last_name: p.lastName || null,
+    email: p.email || null,
+    phone: p.phone || null,
+    phone_2: p.phone2 || null,
     mailing_address: mailingAddressId,
-    first_name: person.firstName || null,
-    last_name: person.lastName || null,
-    primary_email: person.email || null,
-    primary_phone: person.phone || null,
-    alt_phone: person.phone2 || null,
   };
-  const res = await dx(`/items/insureds`, { method: "POST", body: JSON.stringify(body) });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Insured create failed: ${JSON.stringify(json)}`);
-  return id;
+
+  const { data } = await directusRequest<{ data: { id: string } }>(
+    `/items/insureds`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+  return data?.id as string;
 }
 
-async function createPolicy(namedInsuredId: string | null, carrierId: string | null, input: {
-  policyType: string; policyNumber: string; effectiveDate?: string; expirationDate?: string;
-}) {
-  const id = randomUUID();
-  const body = {
-    id,
-    carrier_id: carrierId, // if you later wire clientCompany => carriers, put it here
-    named_insured: namedInsuredId,
-    policy_type: input.policyType || null,
-    policy_number: input.policyNumber || null,
-    effective_date: input.effectiveDate || null,
-    expiration_date: input.expirationDate || null,
-  };
-  const res = await dx(`/items/policies`, { method: "POST", body: JSON.stringify(body) });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Policy create failed: ${JSON.stringify(json)}`);
-  return id;
-}
+type ContactInput = {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  contactType?: string;
+  customType?: string;
+};
 
-async function createClaim(input: {
-  claimNumber: string;
-  claimTypeId: number | null;
-  statusId: number | null;
-  lossCauseId: number | null;
-  primaryInsuredId: string | null;
-  secondaryInsuredId: string | null;
-  lossLocationAddressId: string | null;
-  policyId: string | null;
-  dateOfLoss?: string;
-  dateReceived?: string;
-  description?: string;
-  assignedStaffId?: string | null;
-}) {
-  const id = randomUUID();
-  const body = {
-    id,
-    claim_number: input.claimNumber,
-    policy_id: input.policyId,
-    claim_type_id: input.claimTypeId,
-    status_id: input.statusId,
-    loss_cause_id: input.lossCauseId,
-    primary_insured: input.primaryInsuredId,
-    secondary_insured: input.secondaryInsuredId,
-    loss_location: input.lossLocationAddressId,
-    date_of_loss: input.dateOfLoss || null,
-    reported_date: input.dateReceived || null,
-    description: input.description || null,
-    assigned_to_user: input.assignedStaffId || null,
-  };
-  const res = await dx(`/items/claims`, { method: "POST", body: JSON.stringify(body) });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Claim create failed: ${JSON.stringify(json)}`);
-  return id;
-}
-
-async function createContact(c: {
-  firstName?: string; lastName?: string; email?: string; phone?: string; company?: string; role?: string;
-}) {
-  const id = randomUUID();
-  const body = {
-    id,
-    role: c.role || null,
+/**
+ * Upsert a contact (very light): here we always create a new one.
+ * If you want to dedupe by email/phone, you can search before insert.
+ */
+async function createContact(c: ContactInput) {
+  const payload = {
     first_name: c.firstName || null,
     last_name: c.lastName || null,
-    company: c.company || null,
-    phone: c.phone || null,
     email: c.email || null,
+    phone: c.phone || null,
+    phone_2: null,
   };
-  const res = await dx(`/items/contacts`, { method: "POST", body: JSON.stringify(body) });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Contact create failed: ${JSON.stringify(json)}`);
-  return id;
+
+  const { data } = await directusRequest<{ data: { id: string } }>(
+    `/items/contacts`,
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+  return data?.id as string;
 }
 
-async function linkClaimContact(claimId: string, contactId: string) {
-  const id = randomUUID();
-  const res = await dx(`/items/claims_contacts`, {
-    method: "POST",
-    body: JSON.stringify({ id, claims_id: claimId, contacts_id: contactId }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Link claim-contact failed: ${JSON.stringify(json)}`);
-}
-
-async function recordClaimEvent(claimId: string, payload: unknown, eventType = "intake") {
-  const id = randomUUID();
-  const res = await dx(`/items/claim_events`, {
-    method: "POST",
-    body: JSON.stringify({
-      id,
-      claim_id: claimId,
-      event_type: eventType,
-      payload: JSON.stringify(payload),
-      created_at: new Date().toISOString(),
-    }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Claim event create failed: ${JSON.stringify(json)}`);
-}
-
-function splitName(n?: string) {
-  if (!n) return { first: null, last: null };
-  const parts = n.trim().split(/\s+/);
-  const first = parts.shift() || null;
-  const last = parts.length ? parts.join(" ") : null;
-  return { first, last };
-}
-
-// Optional: map UI "Homeowner/Commercial" -> claim_type lookup names you want
-function mapPolicyTypeToClaimTypeName(policyType?: string) {
-  if (!policyType) return null;
-  if (/home/i.test(policyType)) return "Property";
-  if (/comm/i.test(policyType)) return "Commercial Property";
-  return policyType;
-}
-
+/**
+ * POST handler
+ * Body shape:
+ * {
+ *   formData: {...},
+ *   insuredPersons: InsuredInput[],
+ *   additionalContacts: ContactInput[],
+ *   coverageLines: { id: string; description: string; amount: string }[],
+ *   submitType: "submit" | "submitAndAdd"
+ * }
+ */
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Expecting the shape sent from your page.tsx submit (see client change below)
     const {
       formData,
-      insuredPersons,
-      additionalContacts,
-      coverageLines,
-    } = body as {
-      formData: any;
-      insuredPersons: Array<any>;
-      additionalContacts: Array<any>;
-      coverageLines: Array<any>;
-    };
+      insuredPersons = [],
+      additionalContacts = [],
+      coverageLines = [],
+    } = body ?? {};
+
+    // Basic normalization
+    const carrierId: string | null = formData?.clientCompany || null; // claims.carrier_id
+    const carrierContactId: string | null = formData?.clientContact || null; // optional (claims.carrier_contact_id)
+    const claimNumber: string | null = formData?.claimNumber || null;
+    const policyNumber: string | null = formData?.policyNumber?.trim() || null;
+
+    // Loss / dates / cause
+    const dateOfLoss: string | null = formData?.dateOfLoss || null;              // "YYYY-MM-DD"
+    const dateReceived: string | null = formData?.dateReceived || null;          // "YYYY-MM-DD"
+    const lossCauseId: string | null = formData?.typeOfLoss || null;             // lookup id
+    const deductible: string | null = formData?.deductible || null;
+    const description: string | null = formData?.lossDescription || null;
+
+    // Assigned
+    const assignedAdjusterId: string | null = formData?.assignedAdjuster || null; // staff.id (claims.assigned_to_user)
+
+    // Addresses
+    const lossAddressInput = formData?.propertyAddress as AddressInput | undefined;
+    const mailingAddressInput = formData?.mailingAddress as AddressInput | undefined;
+
+    // Policy extras (only used if policyNumber is provided)
+    const effectiveDate: string | null = formData?.effectiveDate || null;
+    const expirationDate: string | null = formData?.expirationDate || null;
+    const policyType: string | null = formData?.policyType || null;
+    const formNumbers: string | null = formData?.formNumbers || null;
+
+    // 0) Guard rails
+    if (!carrierId) {
+      return NextResponse.json({ error: "Client Company (carrier) is required" }, { status: 400 });
+    }
+    if (!claimNumber) {
+      return NextResponse.json({ error: "Claim Number is required" }, { status: 400 });
+    }
 
     // 1) Addresses
-    const propertyAddressId = await createAddress(formData.propertyAddress);
-    const mailingAddressId = formData.sameAsProperty
-      ? propertyAddressId
-      : await createAddress(formData.mailingAddress);
+    const lossAddressId = await createAddressOrNull(lossAddressInput);
+    const mailingAddressId = await createAddressOrNull(mailingAddressInput);
 
-    // 2) Insureds (primary + optional secondary+)
-    const primaryInsured = insuredPersons?.[0];
-    if (!primaryInsured?.firstName || !primaryInsured?.lastName) {
-      return NextResponse.json({ error: "Primary insured first/last name required" }, { status: 400 });
+    // 2) Insureds (at least one)
+    const primaryInsuredInput: InsuredInput | undefined = insuredPersons[0];
+    if (!primaryInsuredInput) {
+      return NextResponse.json({ error: "At least one insured is required" }, { status: 400 });
     }
-    const primaryInsuredId = await createInsured(primaryInsured, mailingAddressId || null);
+    const primaryInsuredId = await createInsured(primaryInsuredInput, mailingAddressId);
 
     let secondaryInsuredId: string | null = null;
-    if (insuredPersons?.length > 1) {
-      const s = insuredPersons[1];
-      if (s?.firstName || s?.lastName || s?.email || s?.phone) {
-        secondaryInsuredId = await createInsured(s, mailingAddressId || null);
-      }
+    if (insuredPersons.length > 1) {
+      // For simplicity, only create one extra insured as "secondary"
+      const second = insuredPersons[1];
+      secondaryInsuredId = await createInsured(second, mailingAddressId);
     }
 
-    // 3) Policy
-    // (Hook carriers later by mapping clientCompany => carriers; for now pass null)
-    const policyId = await createPolicy(primaryInsuredId, null, {
-      policyType: formData.policyType,
-      policyNumber: formData.policyNumber,
-      effectiveDate: formData.effectiveDate || null,
-      expirationDate: formData.expirationDate || null,
-    });
-
-    // 4) Lookups
-    const lossCauseId = await upsertLookupByName("loss_cause", formData.typeOfLoss || "Other");
-    const claimTypeName = mapPolicyTypeToClaimTypeName(formData.policyType || undefined);
-    const claimTypeId = claimTypeName ? await upsertLookupByName("claim_type", claimTypeName) : null;
-    const statusId = await upsertLookupByName("claim_status", "Open");
-
-    // 5) Assigned staff by name (optional)
-    let assignedStaffId: string | null = null;
-    if (formData.assignedAdjuster) {
-      const { first, last } = splitName(formData.assignedAdjuster);
-      const res = await dx(
-        `/items/staff?filter[first_name][_eq]=${encodeURIComponent(first || "")}&filter[last_name][_eq]=${encodeURIComponent(last || "")}&limit=1`,
-        { cache: "no-store" }
+    // 3) Policy (optional)
+    let policyId: string | null = null;
+    if (policyNumber) {
+      const policyPayload = {
+        policy_number: policyNumber,
+        carrier: carrierId,
+        named_insured: primaryInsuredId,
+        effective_date: effectiveDate || null,
+        expiration_date: expirationDate || null,
+        deductible: deductible ? parseFloat(deductible) : null,
+      };
+      const { data: policy } = await directusRequest<{ data: { id: string } }>(
+        `/items/policies`,
+        { method: "POST", body: JSON.stringify(policyPayload) }
       );
-      const json = await res.json();
-      assignedStaffId = json?.data?.[0]?.id ?? null;
+      policyId = policy?.id ?? null;
     }
 
-    // 6) Claim
-    const claimId = await createClaim({
-      claimNumber: formData.claimNumber,
-      claimTypeId,
-      statusId,
-      lossCauseId,
-      primaryInsuredId,
-      secondaryInsuredId,
-      lossLocationAddressId: propertyAddressId,
-      policyId,
-      dateOfLoss: formData.dateOfLoss || null,
-      dateReceived: formData.dateReceived || null,
-      description: formData.lossDescription || null,
-      assignedStaffId,
-    });
+    // 4) Claim
+    const claimPayload = {
+      carrier: carrierId,
+      carrier_contact_id: carrierContactId || null, // optional
+      claim_number: claimNumber,
 
-    // 7) Additional contacts + junctions
-    if (Array.isArray(additionalContacts)) {
+      policy: policyId,
+      loss_cause: lossCauseId || null,
+
+      primary_insured: primaryInsuredId,
+      secondary_insured: secondaryInsuredId,
+
+      // If you renamed at DB level: use loss_address; else keep loss_location
+      // Replace with the correct column key your Directus uses:
+      loss_location: lossAddressId,     // or loss_address if you’ve renamed
+      mailing_address: mailingAddressId,
+
+      date_of_loss: dateOfLoss || null,
+      date_received: dateReceived || null,
+
+      assigned_to_user: assignedAdjusterId || null, // staff.id
+      deductible: deductible || null,
+      description: description || null,
+    };
+
+    const { data: claim } = await directusRequest<{ data: { id: string } }>(
+      `/items/claims`,
+      { method: "POST", body: JSON.stringify(claimPayload) }
+    );
+    const claimId = claim?.id as string;
+
+    // 5) Additional Contacts (optional) + junction rows
+    if (Array.isArray(additionalContacts) && additionalContacts.length > 0) {
       for (const c of additionalContacts) {
-        if (!c.firstName && !c.lastName && !c.email && !c.phone) continue;
-        const contactId = await createContact({
-          firstName: c.firstName,
-          lastName: c.lastName,
-          email: c.email,
-          phone: c.phone,
-          role: c.contactType === "Other" ? c.customType || "Other" : c.contactType,
-          company: undefined,
-        });
-        await linkClaimContact(claimId, contactId);
+        // Skip empty rows
+        const hasAny =
+          (c.firstName && c.firstName.trim()) ||
+          (c.lastName && c.lastName.trim()) ||
+          (c.email && c.email.trim()) ||
+          (c.phone && c.phone.trim());
+        if (!hasAny) continue;
+
+        const newContactId = await createContact(c);
+
+        // link via claims_contacts
+        await directusRequest(
+          `/items/claims_contacts`,
+          { method: "POST", body: JSON.stringify({ claims_id: claimId, contacts_id: newContactId }) }
+        );
       }
     }
 
-    // 8) Persist coverage lines/form numbers as a structured event payload
-    await recordClaimEvent(claimId, {
-      formNumbers: formData.formNumbers || null,
-      deductible: formData.deductible || null,
-      coverageLines: Array.isArray(coverageLines) ? coverageLines : [],
-      clientCompany: formData.clientCompany || null,
-      clientContact: formData.clientContact || null,
-      primaryContactChoice: formData.primaryContact || null,
-    }, "intake_metadata");
+    // 6) Coverage Lines (only when policy exists)
+    if (policyId && Array.isArray(coverageLines) && coverageLines.length > 0) {
+      // Cap at 8 and skip empty rows
+      const lines = coverageLines
+        .slice(0, 8)
+        .filter((l: any) => (l?.description && String(l.description).trim()) || (l?.amount && String(l.amount).trim()));
+
+      if (lines.length) {
+        for (const line of lines) {
+          const payload = {
+            policy_id: policyId,
+            description: line.description || null,
+            amount: line.amount ? Number(String(line.amount).replace(/[^\d.]/g, "")) : null,
+          };
+
+          await directusRequest(`/items/policy_coverage_lines`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+        }
+      }
+    }
 
     return NextResponse.json({ ok: true, claimId }, { status: 201 });
   } catch (err: any) {
-    console.error("Intake POST error", err);
-    return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
+    console.error("Intake error:", err?.stack || err?.message || err);
+    return NextResponse.json(
+      { error: "Failed to create claim", detail: String(err?.message || err) },
+      { status: 500 }
+    );
   }
 }
-  export {}
-
