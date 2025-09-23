@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { cookies, headers } from "next/headers";
+import { randomUUID } from "crypto";
 
 /**
  * CONFIG
@@ -282,6 +283,7 @@ export async function POST(req: Request) {
 
     // 4) Claim
     const claimPayload = {
+      id: randomUUID(),
       carrier: carrierId,
       carrier_contact_id: carrierContactId || null, // optional
       claim_number: claimNumber,
