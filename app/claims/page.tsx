@@ -23,10 +23,18 @@ type ApiPersonRef =
       email?: string | null;
     };
 type ApiLossLocation = {
+  street_1?: string | null;
+  street_2?: string | null;
   city?: string | null;
   state?: string | null;
   postal_code?: string | null;
 } | null;
+
+type ApiClaimType =
+  | string
+  | number
+  | null
+  | { id?: string; name?: string | null; code?: string | number | null };
 
 type ApiClaim = {
   id: string;
@@ -38,9 +46,11 @@ type ApiClaim = {
   description?: string | null;
 
   primary_insured?: ApiPersonRef;
+  insured_first_name?: string | null;
   insured_last_name?: string | null;
   loss_address?: string | null;
   loss_location?: ApiLossLocation;
+  claim_type?: ApiClaimType;
   participants?: Array<{ id: string; name?: string; role?: string }> | null;
 };
 
@@ -50,7 +60,7 @@ type ApiClaim = {
 export type ClaimListItem = {
   id: string;
   claimNumber: string;
-  primary_insured: string;
+  insuredFirstName: string;
   insuredLastName: string;
   daysOpen: number;
   status: string;
@@ -115,17 +125,35 @@ function personToName(p?: ApiPersonRef): string {
 
 function lossLocationToString(loc?: ApiLossLocation): string {
   if (!loc) return "";
+  const a1 = (loc.street_1 ?? "").trim();
+  const a2 = (loc.street_2 ?? "").trim();
   const city = (loc.city ?? "").trim();
   const state = (loc.state ?? "").trim();
   const postal = (loc.postal_code ?? "").trim();
+  const street = [a1, a2].filter(Boolean).join(" ");
   const cityState = [city, state].filter(Boolean).join(", ");
-  return [cityState, postal].filter(Boolean).join(" ");
+  const csZip = [cityState, postal].filter(Boolean).join(" ");
+  return [street, csZip].filter(Boolean).join(", ");
+}
+
+function claimTypeToLabel(ct?: ApiClaimType): string {
+  if (!ct && ct !== 0) return "";
+  if (typeof ct === "string" || typeof ct === "number") return String(ct);
+  if (typeof ct === "object") {
+    const name = (ct.name ?? "").toString().trim();
+    const code = (ct.code ?? "").toString().trim();
+    return name || code || "";
+  }
+  return "";
 }
 
 function mapApiToListItem(c: ApiClaim): ClaimListItem {
   const dateOfLossISO = toIsoOrEmpty(c.date_of_loss);
   const anchorForDays = c.reported_date || c.date_of_loss || null;
-  const primaryInsured = personToName(c.primary_insured);
+  const insuredFirstName =
+    typeof c.primary_insured === "object" && c.primary_insured?.first_name
+      ? c.primary_insured.first_name ?? ""
+      : "";
   const insuredLastName =
     typeof c.primary_insured === "object" && c.primary_insured?.last_name
       ? c.primary_insured.last_name ?? ""
@@ -133,15 +161,16 @@ function mapApiToListItem(c: ApiClaim): ClaimListItem {
   const lossAddress = c.loss_address
     ? c.loss_address
     : lossLocationToString(c.loss_location);
+  const claimType = claimTypeToLabel(c.claim_type) || "General";
 
   return {
     id: c.id,
     claimNumber: c.claim_number ?? "",
-    primary_insured: primaryInsured,
+    insuredFirstName: (insuredFirstName ?? "").trim(),
     insuredLastName: (insuredLastName ?? "").trim(),
     daysOpen: daysBetween(anchorForDays),
     status: toStatusLabel(c.status),
-    type: "General", // You can replace when your API returns a concrete type
+    type: claimType,
     dateOfLoss: toDisplayDate(c.date_of_loss),
     lossAddress: (lossAddress ?? "").trim(),
     description: c.description ?? "",
@@ -280,7 +309,7 @@ export default function ClaimsPage() {
       const filtered = claims.filter((c) => {
         return (
           c.claimNumber.toLowerCase().includes(q) ||
-          c.primary_insured.toLowerCase().includes(q) ||
+          c.insuredFirstName.toLowerCase().includes(q) ||
           c.insuredLastName.toLowerCase().includes(q) ||
           c.type.toLowerCase().includes(q) ||
           c.lossAddress.toLowerCase().includes(q) ||
@@ -409,7 +438,7 @@ export default function ClaimsPage() {
               <ClaimListCard
                 key={claim.id}
                 claimNumber={claim.claimNumber}
-                primary_insured={claim.primary_insured}
+                primary_insured={claim.insuredFirstName}
                 insuredLastName={claim.insuredLastName}
                 daysOpen={claim.daysOpen}
                 status={claim.status}

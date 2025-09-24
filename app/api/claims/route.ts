@@ -11,7 +11,7 @@ function devLog(...args: any[]) {
 }
 
 // Build a Directus path using your actual schema relations
-function buildClaimsPath(limit = 50, offset = 0) {
+function buildClaimsPath(limit = 50, offset = 0, includeAddressLines = true) {
   const FIELDS = [
     'id',
     'claim_number',
@@ -24,7 +24,8 @@ function buildClaimsPath(limit = 50, offset = 0) {
     'primary_insured.id',
     'primary_insured.first_name',
     'primary_insured.last_name',
-  // Address fields may be restricted; keep minimal fields
+  // Address fields – try full first, fallback if forbidden
+  ...(includeAddressLines ? ['loss_location.street_1','loss_location.street_2'] : []),
     'loss_location.city',
     'loss_location.state',
     'loss_location.postal_code',
@@ -104,11 +105,24 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const limit = Number(searchParams.get('limit') || '50');
   const offset = Number(searchParams.get('offset') || '0');
-  const path = buildClaimsPath(Number.isFinite(limit) ? limit : 50, Number.isFinite(offset) ? offset : 0);
+  const build = (addr: boolean) => buildClaimsPath(Number.isFinite(limit) ? limit : 50, Number.isFinite(offset) ? offset : 0, addr);
+  const primaryPath = build(true);
   const label = '[api/claims] GET';
   console.time?.(label);
   try {
-    const data = await withUserToken(path);
+    let data: any;
+    try {
+      data = await withUserToken(primaryPath);
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      // If 403 or permission-related, retry without address_line1/2
+      if (msg.includes('403') || msg.toLowerCase().includes("don't have permission") || msg.toLowerCase().includes('permission')) {
+        const fallbackPath = build(false);
+        data = await withUserToken(fallbackPath);
+      } else {
+        throw err;
+      }
+    }
     const claims = data?.data ?? [];
     devLog('[api/claims] response payload', {
       count: Array.isArray(claims) ? claims.length : undefined,
