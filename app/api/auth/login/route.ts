@@ -1,5 +1,6 @@
 // /app/api/auth/login/route.ts  (only cookie-name changes shown)
 import { NextResponse } from 'next/server';
+import { headers } from 'next/headers';
 
 const ACCESS = 'ctrk_jwt';
 const REFRESH = 'ctrk_rjwt';
@@ -48,10 +49,16 @@ export async function POST(req: Request) {
     }
 
     const res = NextResponse.json({ ok: true });
-    const cookieOptsBase = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const, path: '/' };
+    // Compute secure flag based on proto/host (localhost should be non-secure)
+    const h = headers();
+    const proto = h.get('x-forwarded-proto') ?? 'http';
+    const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
+    const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+    const secure = proto === 'https' && !isLocal;
+    const cookieOptsBase = { httpOnly: true, secure, sameSite: 'lax' as const, path: '/' };
 
-  res.cookies.set(ACCESS, data.data.access_token, { ...cookieOptsBase, maxAge: 60 * 15 }); // 15 min access
-  res.cookies.set(REFRESH, data.data.refresh_token, { ...cookieOptsBase, maxAge: 60 * 60 * 24 * 30 }); // 30 days
+    res.cookies.set(ACCESS, data.data.access_token, { ...cookieOptsBase, maxAge: 60 * 15 }); // 15 min access
+    res.cookies.set(REFRESH, data.data.refresh_token, { ...cookieOptsBase, maxAge: 60 * 60 * 24 * 30 }); // 30 days
 
     return res;
   } catch (error) {

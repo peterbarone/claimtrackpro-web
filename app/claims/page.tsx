@@ -1,18 +1,67 @@
 // app/claims/page.tsx
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import Link from "next/link";
+"use client";
 
-type Claim = {
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { ClaimsSearchBar } from "@/components/claims-search-bar";
+import { ClaimListCard } from "@/components/claim-list-card";
+
+// ---------------------------
+// Types from your API route
+// ---------------------------
+type ApiStatus =
+  | number
+  | null
+  | { id?: string; name?: string | null; code?: string | number | null };
+type ApiPersonRef =
+  | string
+  | null
+  | {
+      id: string;
+      first_name?: string | null;
+      last_name?: string | null;
+      email?: string | null;
+    };
+type ApiLossLocation = {
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+} | null;
+
+type ApiClaim = {
   id: string;
   claim_number: string;
-  status: number | null;
+  status: ApiStatus;
   date_of_loss?: string | null;
   reported_date?: string | null;
-  assigned_to_user?: string | null;
+  assigned_to_user?: ApiPersonRef;
   description?: string | null;
+
+  primary_insured?: ApiPersonRef;
+  insured_last_name?: string | null;
+  loss_address?: string | null;
+  loss_location?: ApiLossLocation;
+  participants?: Array<{ id: string; name?: string; role?: string }> | null;
 };
 
+// ---------------------------
+// UI model from your layout
+// ---------------------------
+export type ClaimListItem = {
+  id: string;
+  claimNumber: string;
+  primary_insured: string;
+  insuredLastName: string;
+  daysOpen: number;
+  status: string;
+  type: string; // fallback for now (e.g., "Property", "Auto") – we map to "General" if unknown
+  dateOfLoss: string; // ISO string
+  lossAddress: string;
+  description: string;
+  participants: Array<{ id: string; name?: string; role?: string }>;
+};
+
+// Status label map (kept from your table version)
 const STATUS_LABEL: Record<number, string> = {
   1: "New",
   2: "Assigned",
@@ -21,138 +70,383 @@ const STATUS_LABEL: Record<number, string> = {
   5: "Closed",
 };
 
-async function getClaims(cookieHeader: string): Promise<Claim[]> {
-  try {
-    // Use absolute URL for SSR; works in both local and prod
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXT_PUBLIC_SITE_URL
-      ? process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "")
-      : `http://localhost:3000`;
-    const apiUrl = `${baseUrl}/api/auth/claims`;
-
-    console.log("getClaims: using API URL", apiUrl);
-
-    const res = await fetch(apiUrl, {
-      cache: "no-store",
-      headers: {
-        Cookie: cookieHeader,
-        Accept: "application/json",
-      },
-    });
-
-    console.log("getClaims: API response status", res.status);
-
-    if (res.status === 401) {
-      console.log("getClaims: Not authenticated (401)");
-      return [];
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error(
-        "getClaims: /api/auth/claims failed",
-        res.status,
-        text.slice(0, 300)
-      );
-      return [];
-    }
-
-    const json = await res.json(); // { ok, data }
-    console.log("getClaims: API response body", json);
-    return Array.isArray(json?.data) ? (json.data as Claim[]) : [];
-  } catch (err) {
-    console.error("getClaims: error fetching claims", err);
-    return [];
-  }
+// ---------------------------
+// Helpers
+// ---------------------------
+function daysBetween(from?: string | null, to: Date = new Date()): number {
+  if (!from) return 0;
+  const start = new Date(from).getTime();
+  if (Number.isNaN(start)) return 0;
+  const diff = Math.max(0, to.getTime() - start);
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
-export default async function ClaimsPage() {
-  const jar = cookies();
-  const access = jar.get("ctrk_jwt")?.value;
-  const refresh = jar.get("ctrk_rjwt")?.value;
-  console.log("Claims page: accessing JWT cookies", { access, refresh });
+function toIsoOrEmpty(d?: string | null): string {
+  if (!d) return "";
+  const t = new Date(d);
+  return Number.isNaN(t.getTime()) ? "" : t.toISOString();
+}
 
-  // If no auth cookies at all, bounce to login (keeps UX snappy)
-  if (!access && !refresh) {
-    redirect("/login");
+function toDisplayDate(d?: string | null): string {
+  if (!d) return "";
+  const t = new Date(d);
+  if (Number.isNaN(t.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(t);
+}
+
+function toStatusLabel(status: ApiStatus): string {
+  if (typeof status === "number") return STATUS_LABEL[status] ?? String(status);
+  if (status && typeof status === "object")
+    return (status.name ?? String(status.code ?? "")).toString();
+  return "";
+}
+
+function personToName(p?: ApiPersonRef): string {
+  if (!p) return "";
+  if (typeof p === "string") return p.trim();
+  const first = (p.first_name ?? "").trim();
+  const last = (p.last_name ?? "").trim();
+  return [first, last].filter(Boolean).join(" ");
+}
+
+function lossLocationToString(loc?: ApiLossLocation): string {
+  if (!loc) return "";
+  const city = (loc.city ?? "").trim();
+  const state = (loc.state ?? "").trim();
+  const postal = (loc.postal_code ?? "").trim();
+  const cityState = [city, state].filter(Boolean).join(", ");
+  return [cityState, postal].filter(Boolean).join(" ");
+}
+
+function mapApiToListItem(c: ApiClaim): ClaimListItem {
+  const dateOfLossISO = toIsoOrEmpty(c.date_of_loss);
+  const anchorForDays = c.reported_date || c.date_of_loss || null;
+  const primaryInsured = personToName(c.primary_insured);
+  const insuredLastName =
+    typeof c.primary_insured === "object" && c.primary_insured?.last_name
+      ? c.primary_insured.last_name ?? ""
+      : c.insured_last_name ?? "";
+  const lossAddress = c.loss_address
+    ? c.loss_address
+    : lossLocationToString(c.loss_location);
+
+  return {
+    id: c.id,
+    claimNumber: c.claim_number ?? "",
+    primary_insured: primaryInsured,
+    insuredLastName: (insuredLastName ?? "").trim(),
+    daysOpen: daysBetween(anchorForDays),
+    status: toStatusLabel(c.status),
+    type: "General", // You can replace when your API returns a concrete type
+    dateOfLoss: toDisplayDate(c.date_of_loss),
+    lossAddress: (lossAddress ?? "").trim(),
+    description: c.description ?? "",
+    participants: c.participants ?? [],
+  };
+}
+
+// ---------------------------
+// Fetcher (client-side hit to your API route)
+// Supports simple pagination via limit/offset
+// ---------------------------
+async function fetchClaims(limit = 20, offset = 0): Promise<ApiClaim[]> {
+  const url = `/api/claims?limit=${limit}&offset=${offset}`;
+  const res = await fetch(url, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (res.status === 401) {
+    // Caller will handle redirect
+    throw new Error("UNAUTHENTICATED");
   }
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Failed to fetch claims: ${res.status} ${msg}`);
+  }
+  const json = await res.json();
+  const data = Array.isArray(json?.data) ? (json.data as ApiClaim[]) : [];
+  return data;
+}
 
-  // Forward all cookies to the API for SSR
-  const cookieHeader = jar
-    .getAll()
-    .map((c) => `${c.name}=${c.value}`)
-    .join("; ");
+// ---------------------------
+// Combined Page (Client)
+// ---------------------------
+export default function ClaimsPage() {
+  const router = useRouter();
 
-  console.log("Claims page: fetching claims with cookies", cookieHeader);
-  const claims = await getClaims(cookieHeader);
+  // Data states
+  const [claims, setClaims] = useState<ClaimListItem[]>([]);
+  const [filteredClaims, setFilteredClaims] = useState<ClaimListItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<keyof ClaimListItem>("dateOfLoss");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+
+  // Loading & pagination
+  const PAGE_SIZE = 20;
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Initial load
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setIsLoading(true);
+      setErrorMsg(null);
+      try {
+        const data = await fetchClaims(PAGE_SIZE, 0);
+        if (!alive) return;
+
+        const mapped = data.map(mapApiToListItem);
+        setClaims(mapped);
+        setFilteredClaims(mapped);
+        setHasMore(data.length === PAGE_SIZE);
+        setNextOffset(data.length);
+      } catch (err) {
+        if (err?.message === "UNAUTHENTICATED") {
+          router.replace("/login");
+          return;
+        }
+        setErrorMsg(err?.message ?? "Unknown error loading claims.");
+      } finally {
+        if (alive) {
+          setIsLoading(false);
+          setInitialLoadDone(true);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [router]);
+
+  // Infinite scroll
+  const loadMoreClaims = useCallback(async () => {
+    if (isLoading || !hasMore) return;
+    setIsLoading(true);
+    setErrorMsg(null);
+    try {
+      const data = await fetchClaims(PAGE_SIZE, nextOffset);
+      const mapped = data.map(mapApiToListItem);
+      const updated = [...claims, ...mapped];
+
+      setClaims(updated);
+
+      // If no search query, also extend filtered set
+      if (!searchQuery.trim()) {
+        setFilteredClaims(updated);
+      }
+      setHasMore(data.length === PAGE_SIZE);
+      setNextOffset(nextOffset + data.length);
+    } catch (err) {
+      if (err?.message === "UNAUTHENTICATED") {
+        router.replace("/login");
+        return;
+      }
+      setErrorMsg(err?.message ?? "Unknown error loading more claims.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, hasMore, nextOffset, claims, searchQuery, router]);
+
+  // Scroll listener
+  useEffect(() => {
+    const handler = () => {
+      const nearBottom =
+        window.innerHeight + document.documentElement.scrollTop >=
+        document.documentElement.offsetHeight - 1000;
+      if (nearBottom) loadMoreClaims();
+    };
+    window.addEventListener("scroll", handler);
+    return () => window.removeEventListener("scroll", handler);
+  }, [loadMoreClaims]);
+
+  // Search
+  const handleSearch = useCallback(
+    (query: string) => {
+      setSearchQuery(query);
+      if (!query.trim()) {
+        setFilteredClaims(claims);
+        return;
+      }
+      const q = query.toLowerCase();
+      const filtered = claims.filter((c) => {
+        return (
+          c.claimNumber.toLowerCase().includes(q) ||
+          c.primary_insured.toLowerCase().includes(q) ||
+          c.insuredLastName.toLowerCase().includes(q) ||
+          c.type.toLowerCase().includes(q) ||
+          c.lossAddress.toLowerCase().includes(q) ||
+          c.description.toLowerCase().includes(q) ||
+          c.status.toLowerCase().includes(q)
+        );
+      });
+      setFilteredClaims(filtered);
+    },
+    [claims]
+  );
+
+  // Sort
+  const handleSort = useCallback(
+    (field: keyof ClaimListItem | string, direction: "asc" | "desc") => {
+      // Type guard for safety
+      const f = (field as keyof ClaimListItem) ?? "dateOfLoss";
+      setSortField(f);
+      setSortDirection(direction);
+
+      const sorted = [...filteredClaims].sort((a, b) => {
+        let aValue: any = a[f];
+        let bValue: any = b[f];
+
+        if (f === "insuredLastName") {
+          aValue = a.insuredLastName;
+          bValue = b.insuredLastName;
+        } else if (f === "dateOfLoss") {
+          aValue = a.dateOfLoss ? new Date(a.dateOfLoss) : new Date(0);
+          bValue = b.dateOfLoss ? new Date(b.dateOfLoss) : new Date(0);
+        } else if (f === "daysOpen") {
+          aValue = a.daysOpen;
+          bValue = b.daysOpen;
+        }
+
+        if (direction === "asc")
+          return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+        return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
+      });
+
+      setFilteredClaims(sorted);
+    },
+    [filteredClaims]
+  );
+
+  // Keep search results in sync when base data changes
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      // resort when claims change (e.g., after loadMore)
+      const fresh = [...claims];
+      // apply the current sort to maintain order
+      const sorted = fresh.sort((a, b) => {
+        let aValue: any = a[sortField];
+        let bValue: any = b[sortField];
+        if (sortField === "dateOfLoss") {
+          aValue = a.dateOfLoss ? new Date(a.dateOfLoss) : new Date(0);
+          bValue = b.dateOfLoss ? new Date(b.dateOfLoss) : new Date(0);
+        }
+        if (sortDirection === "asc")
+          return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+        return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
+      });
+      setFilteredClaims(sorted);
+    } else {
+      // re-run search to include new items
+      handleSearch(searchQuery);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claims]);
+
+  const handleClaimClick = useCallback(
+    (claimNumber: string) => {
+      // If your detail route uses id, you can change this to `/claims/${id}`
+      // Here we match your desired behavior from the sample (by claim #)
+      router.push(`/claims/${claimNumber}`);
+    },
+    [router]
+  );
+
+  const resultsSummary = useMemo(() => {
+    const total = claims.length;
+    const shown = filteredClaims.length;
+    return `Showing ${shown} of ${total} claims${
+      searchQuery ? ` matching "${searchQuery}"` : ""
+    }`;
+  }, [claims.length, filteredClaims.length, searchQuery]);
 
   return (
-    <div className="p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Claims</h1>
-        <div className="text-sm text-gray-500">
-          {claims.length
-            ? `${claims.length} result${claims.length > 1 ? "s" : ""}`
-            : "No results"}
-        </div>
+    <div className="space-y-6 p-6">
+      {/* Page Title */}
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900">Claims</h1>
+        <p className="text-gray-600 mt-2">
+          Manage and review all assigned claims
+        </p>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-left">
-            <tr>
-              <th className="px-3 py-2 border-b">Claim #</th>
-              <th className="px-3 py-2 border-b">Status</th>
-              <th className="px-3 py-2 border-b">Date of Loss</th>
-              <th className="px-3 py-2 border-b">Reported Date</th>
-              <th className="px-3 py-2 border-b">Assigned To</th>
-              <th className="px-3 py-2 border-b">Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            {claims.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="py-6 text-center text-gray-600">
-                  <div>No claims found.</div>
-                  console.log("Claims page: no claims found", claims);
-                </td>
-              </tr>
-            ) : (
-              claims.map((c) => (
-                <tr
-                  key={c.id}
-                  className="border-b last:border-0 hover:bg-gray-50"
-                >
-                  <td className="px-3 py-2">
-                    <Link
-                      href={`/claims/${c.id}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {c.claim_number}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">
-                    {typeof c.status === "number"
-                      ? STATUS_LABEL[c.status] ?? c.status
-                      : ""}
-                  </td>
-                  <td className="px-3 py-2">
-                    {c.date_of_loss
-                      ? new Date(c.date_of_loss).toLocaleDateString()
-                      : ""}
-                  </td>
-                  <td className="px-3 py-2">
-                    {c.reported_date
-                      ? new Date(c.reported_date).toLocaleDateString()
-                      : ""}
-                  </td>
-                  <td className="px-3 py-2">{c.assigned_to_user ?? ""}</td>
-                  <td className="px-3 py-2">{c.description ?? ""}</td>
-                </tr>
-              ))
+      {/* Search / Sort Bar */}
+      <ClaimsSearchBar
+        onSearch={handleSearch}
+        onSort={(field, dir) => handleSort(field as keyof ClaimListItem, dir)}
+        onFilter={() => console.log("Filter functionality")}
+      />
+
+      {/* Error State */}
+      {errorMsg && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {errorMsg}
+        </div>
+      )}
+
+      {/* List */}
+      <div className="space-y-4">
+        {initialLoadDone && filteredClaims.length === 0 && searchQuery ? (
+          <div className="text-center py-12">
+            <p className="text-gray-500 text-lg">
+              No claims found matching "{searchQuery}"
+            </p>
+            <p className="text-gray-400 text-sm mt-2">
+              Try adjusting your search terms or filters
+            </p>
+          </div>
+        ) : (
+          <>
+            {filteredClaims.map((claim) => (
+              <ClaimListCard
+                key={claim.id}
+                claimNumber={claim.claimNumber}
+                primary_insured={claim.primary_insured}
+                insuredLastName={claim.insuredLastName}
+                daysOpen={claim.daysOpen}
+                status={claim.status}
+                type={claim.type}
+                dateOfLoss={claim.dateOfLoss}
+                lossAddress={claim.lossAddress}
+                description={claim.description}
+                participants={claim.participants}
+                href={`/claims/${claim.claimNumber}`}
+              />
+            ))}
+
+            {/* Loading */}
+            {isLoading && (
+              <div className="text-center py-8">
+                <div className="inline-flex items-center space-x-2">
+                  <div className="w-4 h-4 border-2 border-[#92C4D5] border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-gray-600">Loading more claims...</span>
+                </div>
+              </div>
             )}
-          </tbody>
-        </table>
+
+            {/* End-of-results (only when not searching) */}
+            {!hasMore && !searchQuery && initialLoadDone && (
+              <div className="text-center py-8">
+                <p className="text-gray-500">
+                  You've reached the end of the claims list
+                </p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Results summary */}
+      <div className="text-sm text-gray-500 text-center py-4">
+        {resultsSummary}
       </div>
     </div>
   );

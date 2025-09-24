@@ -16,21 +16,66 @@ function getSecureFlag() {
   return proto === 'https' && !isLocal;
 }
 
-async function getClaims(accessToken: string) {
+async function getClaims(accessToken: string, limit = 20, offset = 0) {
   const DIRECTUS_URL = process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL;
   if (!DIRECTUS_URL) throw new Error('Missing DIRECTUS_URL env var');
 
-  const r = await fetch(
-    `${DIRECTUS_URL}/items/claims?limit=20&sort[]=-date_created&fields=id,claim_number,status,date_of_loss,reported_date,assigned_to_user,description`,
-    {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json',
-      },
-      cache: 'no-store',
-    }
-  );
+  // Request expanded relations to power the UI components
+  const fields = [
+    'id',
+    'claim_number',
+    'date_of_loss',
+    'reported_date',
+    'description',
+    'date_created',
+    // status (relational if configured)
+    'status.*',
+    // claim type
+    'claim_type.*',
+    // insured (primary)
+    'primary_insured.id',
+    'primary_insured.first_name',
+    'primary_insured.last_name',
+    'primary_insured.avatar',
+    // loss location
+    'loss_location.address_line1',
+    'loss_location.address_line2',
+    'loss_location.city',
+    'loss_location.state',
+    'loss_location.postal_code',
+    // participants via claims_contacts -> contacts
+    'claims_contacts.id',
+    'claims_contacts.role',
+    'claims_contacts.contacts_id.id',
+    'claims_contacts.contacts_id.first_name',
+    'claims_contacts.contacts_id.last_name',
+    'claims_contacts.contacts_id.avatar',
+    // assigned user (staff)
+    'assigned_to_user.id',
+    'assigned_to_user.first_name',
+    'assigned_to_user.last_name',
+    'assigned_to_user.email',
+    'assigned_to_user.avatar',
+  ].join(',');
+
+  const params = new URLSearchParams();
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
+  params.append('sort[]', '-date_created');
+  params.set('fields', fields);
+  // cap deep list to avoid huge payloads
+  params.set('deep[claims_contacts][limit]', '10');
+
+  const url = `${DIRECTUS_URL}/items/claims?${params.toString()}`;
+
+  const r = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+    },
+    cache: 'no-store',
+  });
 
   console.log("API getClaims: Directus response status", r.status);
 
@@ -77,8 +122,11 @@ async function refreshTokens(refreshToken: string) {
   return json.data ?? json;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+  const url = new URL(req.url);
+  const limit = Math.max(1, Math.min(100, parseInt(url.searchParams.get('limit') ?? '20', 10)));
+  const offset = Math.max(0, parseInt(url.searchParams.get('offset') ?? '0', 10));
   const jar = cookies();
   const allCookies = jar.getAll();
   const access = jar.get(ACCESS)?.value;
@@ -94,7 +142,7 @@ export async function GET() {
     // 1) Try with current access token
     if (access) {
       try {
-        const claims = await getClaims(access);
+        const claims = await getClaims(access, limit, offset);
         console.log("Claims API: fetched claims with access", claims);
         return NextResponse.json({ ok: true, data: claims.data });
       } catch (e: any) {
@@ -116,7 +164,7 @@ export async function GET() {
   const freshAccess = tokens.access_token;
   const freshRefresh = tokens.refresh_token ?? refresh;
 
-  const claims = await getClaims(freshAccess);
+  const claims = await getClaims(freshAccess, limit, offset);
   console.log("Claims API: fetched claims with refreshed access", claims);
 
   // Build ONE response, set cookies on it, then return THAT response.

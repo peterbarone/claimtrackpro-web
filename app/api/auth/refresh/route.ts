@@ -1,4 +1,4 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 const DIRECTUS_URL = (process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL || '').replace(/\/+$/, '');
@@ -23,7 +23,11 @@ export async function POST() {
 
   const res = NextResponse.json({ ok: true });
   // Match login cookie attributes for consistency (localhost-friendly)
-  const secure = process.env.NODE_ENV === 'production';
+  const h = headers();
+  const proto = h.get('x-forwarded-proto') ?? 'http';
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
+  const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+  const secure = proto === 'https' && !isLocal;
   const baseOpts = {
     httpOnly: true,
     secure,
