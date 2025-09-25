@@ -16,6 +16,8 @@ import { Modal } from "@/components/ui/modal";
 import { ClaimTaskForm } from "@/components/claim-task-form";
 import { ClaimNoteForm } from "@/components/claim-note-form";
 import { NotesPanel, NoteItem } from "@/components/notes-panel";
+import { FilesPanel, ClaimFile } from "@/components/files-panel";
+import { FileUploadForm } from "@/components/file-upload-form";
 
 /* ========= Inline shared types (no server import needed) ========= */
 type HeaderProps = {
@@ -72,11 +74,13 @@ export default function ClaimDetailsClient() {
   const [timeline, setTimeline] = useState<UITimelineItem[]>([]);
   const [tasks, setTasks] = useState<ActiveTask[]>([]);
   const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [files, setFiles] = useState<ClaimFile[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([]);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [addNoteOpen, setAddNoteOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   async function refreshTasks() {
     if (!claimId) return;
@@ -155,6 +159,20 @@ export default function ClaimDetailsClient() {
     }
   }
 
+  async function refreshFiles() {
+    if (!claimId) return;
+    try {
+      const r = await fetch(
+        `/api/claims/${encodeURIComponent(claimId)}/files`,
+        { cache: "no-store" }
+      );
+      if (!r.ok) return;
+      const json = await r.json();
+      const list = Array.isArray(json?.data) ? json.data : [];
+      setFiles(list as ClaimFile[]);
+    } catch {}
+  }
+
   // initial load of notes
   useEffect(() => {
     refreshNotes();
@@ -164,6 +182,12 @@ export default function ClaimDetailsClient() {
   // initial load of tasks
   useEffect(() => {
     refreshTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimId]);
+
+  // initial load of files
+  useEffect(() => {
+    refreshFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimId]);
 
@@ -432,7 +456,7 @@ export default function ClaimDetailsClient() {
           <div className="lg:w-1/3 flex flex-col space-y-6">
             <QuickActions
               onAddNote={() => setAddNoteOpen(true)}
-              onUploadDocument={() => handleQuickAction("Upload Document")}
+              onUploadDocument={() => setUploadOpen(true)}
               onCreateTask={() => setAddTaskOpen(true)}
               onPhoneCall={() => handleQuickAction("Phone Call")}
               onEmail={() => handleQuickAction("Email")}
@@ -451,6 +475,9 @@ export default function ClaimDetailsClient() {
 
             {/* Notes below the task panel */}
             <NotesPanel notes={notes} />
+
+            {/* Files below notes */}
+            <FilesPanel files={files} />
           </div>
 
           {/* Right column */}
@@ -521,6 +548,21 @@ export default function ClaimDetailsClient() {
           onCreatedAction={async () => {
             await refreshNotes();
             setAddNoteOpen(false);
+          }}
+        />
+      </Modal>
+
+      {/* Upload File Modal */}
+      <Modal
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        title="Upload File"
+      >
+        <FileUploadForm
+          claimId={String(claimId)}
+          onUploadedAction={async () => {
+            await refreshFiles();
+            setUploadOpen(false);
           }}
         />
       </Modal>
