@@ -201,7 +201,30 @@ export default function ClaimIntake() {
   ];
 
   // Contact types for Additional Contacts
-  const contactTypes = ["Agent", "Broker", "Tenant", "Property Manager", "Other"];
+  const [contactTypes, setContactTypes] = useState<string[]>([]);
+  const [contactTypesLoading, setContactTypesLoading] = useState<boolean>(true);
+  useEffect(() => {
+    let isActive = true;
+    setContactTypesLoading(true);
+    fetch("/api/roles")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isActive) return;
+        const arr = Array.isArray(data?.data)
+          ? data.data
+              .map((r: any) => r?.name)
+              .filter((n: any) => typeof n === "string" && n.trim().length > 0)
+          : [];
+        // Always include "Other" as a choice at the end
+        const unique = Array.from(new Set([...arr, "Other"]));
+        setContactTypes(unique);
+      })
+      .catch(() => setContactTypes(["Other"]))
+      .finally(() => isActive && setContactTypesLoading(false));
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   // Dynamic loss causes (we'll store ID now)
   const [lossCauses, setLossCauses] = useState<{ id: string; name: string }[]>([]);
@@ -895,9 +918,10 @@ export default function ClaimIntake() {
                       <Select
                         value={contact.contactType}
                         onValueChange={(v) => updateAdditionalContact(contact.id, "contactType", v)}
+                        disabled={contactTypesLoading}
                       >
                         <SelectTrigger className="h-11">
-                          <SelectValue placeholder="Select contact type" />
+                          <SelectValue placeholder={contactTypesLoading ? "Loading..." : "Select contact type"} />
                         </SelectTrigger>
                         <SelectContent>
                           {contactTypes.map((type) => (
