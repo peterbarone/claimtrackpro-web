@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import AppShell from "@/components/AppShell";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -437,7 +438,8 @@ export default function ClaimIntake() {
   const handleCancel = () => router.push("/dashboard");
 
   return (
-    <div className="space-y-6">
+    <AppShell>
+      <div className="space-y-6">
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -844,17 +846,17 @@ export default function ClaimIntake() {
 
             {/* Additional Contacts */}
             <div className="space-y-4">
-              <h4 className="text-lg font-medium text-gray-900">Additional Contacts</h4>
+              <h4 className="text-lg font-medium text-gray-900">Additional Contacts & Claim Participant</h4>
 
               <Button type="button" variant="outline" size="sm" onClick={addAdditionalContact} className="h-9">
                 <PlusIcon className="h-4 w-4 mr-1" />
-                Add Contact
+                Add Contact Or Participant
               </Button>
 
               {additionalContacts.map((contact) => (
                 <div key={contact.id} className="border rounded-lg p-4 space-y-4">
                   <div className="flex items-center justify-between">
-                    <h5 className="font-medium text-gray-900">Additional Contact</h5>
+                    <h5 className="font-medium text-gray-900">Additional Contact Or Participant</h5>
                     <Button
                       type="button"
                       variant="ghost"
@@ -914,7 +916,7 @@ export default function ClaimIntake() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Contact Type</Label>
+                      <Label className="text-sm font-medium">Contact Or Participant Type</Label>
                       <Select
                         value={contact.contactType}
                         onValueChange={(v) => updateAdditionalContact(contact.id, "contactType", v)}
@@ -1254,6 +1256,7 @@ export default function ClaimIntake() {
           </Button>
         </div>
       </form>
-    </div>
+      </div>
+    </AppShell>
   );
 }

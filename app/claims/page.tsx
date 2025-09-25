@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { ClaimsSearchBar } from "@/components/claims-search-bar";
 import { ClaimListCard } from "@/components/claim-list-card";
+import AppShell from "@/components/AppShell";
 
 // ---------------------------
 // Types from your API route
@@ -398,85 +399,89 @@ export default function ClaimsPage() {
   }, [claims.length, filteredClaims.length, searchQuery]);
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Page Title */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Claims</h1>
-        <p className="text-gray-600 mt-2">
-          Manage and review all assigned claims
-        </p>
-      </div>
-
-      {/* Search / Sort Bar */}
-      <ClaimsSearchBar
-        onSearch={handleSearch}
-        onSort={(field, dir) => handleSort(field as keyof ClaimListItem, dir)}
-        onFilter={() => console.log("Filter functionality")}
-      />
-
-      {/* Error State */}
-      {errorMsg && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {errorMsg}
+    <AppShell>
+      <div className="space-y-6">
+        {/* Page Title */}
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Claims</h1>
+          <p className="text-gray-600 mt-2">
+            Manage and review all assigned claims
+          </p>
         </div>
-      )}
 
-      {/* List */}
-      <div className="space-y-4">
-        {initialLoadDone && filteredClaims.length === 0 && searchQuery ? (
-          <div className="text-center py-12">
-            <p className="text-gray-500 text-lg">
-              No claims found matching "{searchQuery}"
-            </p>
-            <p className="text-gray-400 text-sm mt-2">
-              Try adjusting your search terms or filters
-            </p>
+        {/* Search / Sort Bar */}
+        <ClaimsSearchBar
+          onSearch={handleSearch}
+          onSort={(field, dir) => handleSort(field as keyof ClaimListItem, dir)}
+          onFilter={() => console.log("Filter functionality")}
+        />
+
+        {/* Error State */}
+        {errorMsg && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {errorMsg}
           </div>
-        ) : (
-          <>
-            {filteredClaims.map((claim) => (
-              <ClaimListCard
-                key={claim.id}
-                claimNumber={claim.claimNumber}
-                primary_insured={claim.insuredFirstName}
-                insuredLastName={claim.insuredLastName}
-                daysOpen={claim.daysOpen}
-                status={claim.status}
-                type={claim.type}
-                dateOfLoss={claim.dateOfLoss}
-                lossAddress={claim.lossAddress}
-                description={claim.description}
-                participants={claim.participants}
-                href={`/claims/${claim.claimNumber}`}
-              />
-            ))}
-
-            {/* Loading */}
-            {isLoading && (
-              <div className="text-center py-8">
-                <div className="inline-flex items-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-[#92C4D5] border-t-transparent rounded-full animate-spin"></div>
-                  <span className="text-gray-600">Loading more claims...</span>
-                </div>
-              </div>
-            )}
-
-            {/* End-of-results (only when not searching) */}
-            {!hasMore && !searchQuery && initialLoadDone && (
-              <div className="text-center py-8">
-                <p className="text-gray-500">
-                  You've reached the end of the claims list
-                </p>
-              </div>
-            )}
-          </>
         )}
-      </div>
 
-      {/* Results summary */}
-      <div className="text-sm text-gray-500 text-center py-4">
-        {resultsSummary}
+        {/* List */}
+        <div className="space-y-4">
+          {initialLoadDone && filteredClaims.length === 0 && searchQuery ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500 text-lg">
+                No claims found matching "{searchQuery}"
+              </p>
+              <p className="text-gray-400 text-sm mt-2">
+                Try adjusting your search terms or filters
+              </p>
+            </div>
+          ) : (
+            <>
+              {filteredClaims.map((claim) => (
+                <ClaimListCard
+                  key={claim.id}
+                  claimNumber={claim.claimNumber}
+                  primary_insured={claim.insuredFirstName}
+                  insuredLastName={claim.insuredLastName}
+                  daysOpen={claim.daysOpen}
+                  status={claim.status}
+                  type={claim.type}
+                  dateOfLoss={claim.dateOfLoss}
+                  lossAddress={claim.lossAddress}
+                  description={claim.description}
+                  participants={claim.participants}
+                  href={`/claims/${claim.id}`}
+                />
+              ))}
+
+              {/* Loading */}
+              {isLoading && (
+                <div className="text-center py-8">
+                  <div className="inline-flex items-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-[#92C4D5] border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-gray-600">
+                      Loading more claims...
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* End-of-results (only when not searching) */}
+              {!hasMore && !searchQuery && initialLoadDone && (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">
+                    You've reached the end of the claims list
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Results summary */}
+        <div className="text-sm text-gray-500 text-center py-4">
+          {resultsSummary}
+        </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

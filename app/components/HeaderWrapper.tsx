@@ -7,16 +7,11 @@ import { HeaderUser } from "./HeaderUser";
 export function HeaderWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
-  const showHeader = pathname !== "/login";
+  const showHeader = false; // Remove top-most header; AppShell provides the page header
 
   return (
     <div className="flex flex-col min-h-screen">
-      {showHeader && (
-        <header className="flex justify-between items-center px-4 py-2 border-b">
-          <h1 className="text-lg font-semibold">ClaimTrackPro</h1>
-          <HeaderUser />
-        </header>
-      )}
+      {/* Top-most header removed to avoid duplication. */}
       <main className="flex-1">{children}</main>
     </div>
   );

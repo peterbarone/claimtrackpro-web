@@ -20,7 +20,7 @@ interface SidebarProps {
 }
 
 const navigationItems = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboardIcon },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboardIcon },
   { name: "Claims", href: "/claims", icon: FileTextIcon },
   { name: "Tasks", href: "/tasks", icon: CheckSquareIcon },
   { name: "Settings", href: "/settings", icon: SettingsIcon },

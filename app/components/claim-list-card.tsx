@@ -87,6 +87,7 @@ export function ClaimListCard({
   };
 
   const handleCardClick = () => {
+    // Navigate to the provided href; caller controls the path (now /claims/{id})
     if (href) router.push(href);
   };
 
