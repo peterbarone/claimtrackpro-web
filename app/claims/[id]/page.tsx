@@ -15,6 +15,7 @@ import AppShell from "@/components/AppShell";
 import { Modal } from "@/components/ui/modal";
 import { ClaimTaskForm } from "@/components/claim-task-form";
 import { ClaimNoteForm } from "@/components/claim-note-form";
+import { NotesPanel, NoteItem } from "@/components/notes-panel";
 
 /* ========= Inline shared types (no server import needed) ========= */
 type HeaderProps = {
@@ -70,6 +71,7 @@ export default function ClaimDetailsClient() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [timeline, setTimeline] = useState<UITimelineItem[]>([]);
   const [tasks, setTasks] = useState<ActiveTask[]>([]);
+  const [notes, setNotes] = useState<NoteItem[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTasks, setActiveTasks] = useState<ActiveTask[]>([]);
@@ -129,6 +131,35 @@ export default function ClaimDetailsClient() {
   useEffect(() => {
     setActiveTasks(tasks);
   }, [tasks]);
+  async function refreshNotes() {
+    if (!claimId) return;
+    try {
+      const r = await fetch(
+        `/api/claims/${encodeURIComponent(claimId)}/notes`,
+        {
+          cache: "no-store",
+        }
+      );
+      if (!r.ok) return;
+      const json = await r.json();
+      const list = Array.isArray(json?.data) ? json.data : [];
+      const mapped: NoteItem[] = list.map((n: any) => ({
+        id: String(n.id),
+        note: n.note ?? "",
+        visibility: n.visibility ?? null,
+        date_created: n.date_created ?? null,
+      }));
+      setNotes(mapped);
+    } catch {
+      // swallow
+    }
+  }
+
+  // initial load of notes
+  useEffect(() => {
+    refreshNotes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimId]);
 
   // initial load of tasks
   useEffect(() => {
@@ -417,6 +448,9 @@ export default function ClaimDetailsClient() {
                 onCancelTask={(taskId) => handleTaskAction("cancel", taskId)}
               />
             </div>
+
+            {/* Notes below the task panel */}
+            <NotesPanel notes={notes} />
           </div>
 
           {/* Right column */}
@@ -484,8 +518,8 @@ export default function ClaimDetailsClient() {
       >
         <ClaimNoteForm
           claimId={String(claimId)}
-          onCreatedAction={() => {
-            // Optional: trigger a timeline refresh if notes are shown later
+          onCreatedAction={async () => {
+            await refreshNotes();
             setAddNoteOpen(false);
           }}
         />

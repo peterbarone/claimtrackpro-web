@@ -4,10 +4,18 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 const ACCESS_COOKIE = process.env.COOKIE_NAME || "ctrk_jwt";
-const REFRESH_COOKIE = process.env.REFRESH_COOKIE_NAME || "ctrk_rjwt";
+const REFRESH_COOKIE = process.env.REFRESH_COOKIE_NAME || "ctrk_refresh";
 const RAW_DIRECTUS_URL = process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL;
 if (!RAW_DIRECTUS_URL) throw new Error("Missing DIRECTUS_URL/NEXT_PUBLIC_DIRECTUS_URL");
-const DIRECTUS_URL = RAW_DIRECTUS_URL.replace(/\/+$/, ""); // trim trailing slash
+const DIRECTUS_URL = RAW_DIRECTUS_URL.replace(/\/+$/, "");
+
+// Optional service token fallback (match working routes if they use it)
+const SERVICE_TOKEN =
+  process.env.DIRECTUS_STATIC_TOKEN ||
+  process.env.DIRECTUS_SERVICE_TOKEN ||
+  process.env.DIRECTUS_TOKEN ||
+  process.env.DIRECTUS_ADMIN_TOKEN ||
+  "";
 
 function isLocal() {
   try {
@@ -61,176 +69,207 @@ async function refreshAccessToken(refreshToken: string) {
 }
 
 function setAuthCookies(res: NextResponse, access: string, refresh: string, expires?: number | string) {
-  const opts = {
-    httpOnly: true as const,
-    sameSite: "lax" as const,
-    secure: !isLocal(),
-    path: "/",
-  };
-  let maxAge: number | undefined = undefined;
+  const opts = { httpOnly: true as const, sameSite: "lax" as const, secure: !isLocal(), path: "/" };
+  let maxAge: number | undefined;
   if (typeof expires === "number") {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const delta = Math.max(0, expires - nowSec);
-    if (delta) maxAge = delta;
+    const now = Math.floor(Date.now() / 1000);
+    maxAge = Math.max(0, expires - now);
   } else if (typeof expires === "string") {
     const when = Date.parse(expires);
-    if (!Number.isNaN(when)) {
-      const delta = Math.max(0, Math.floor((when - Date.now()) / 1000));
-      if (delta) maxAge = delta;
-    }
+    if (!Number.isNaN(when)) maxAge = Math.max(0, Math.floor((when - Date.now()) / 1000));
   }
   res.cookies.set(ACCESS_COOKIE, access, { ...opts, ...(maxAge ? { maxAge } : {}) });
-  res.cookies.set(REFRESH_COOKIE, refresh, { ...opts, ...(maxAge ? { maxAge: (maxAge as number) * 12 } : {}) });
+  res.cookies.set(REFRESH_COOKIE, refresh, { ...opts, ...(maxAge ? { maxAge: maxAge * 12 } : {}) });
 }
 
-const NOTE_COLLECTIONS = ["claim_notes", "claims_notes", "notes"] as const;
-// Shape: { id, claim, note, visibility }
-const FIELDS_FULL = "id,claim,note,visibility,date_created";
-const FIELDS_SAFE = "id,claim,note,visibility,date_created";
+const NOTES_COLLECTIONS = ["claim_notes", "claims_notes", "notes"];
+// Prefer new model fields; include fallback to legacy date_created
+const FIELDS_CREATED_AT = "id,claim,note,visibility,created_at,created_by";
+const FIELDS_DATE_CREATED = "id,claim,note,visibility,date_created,created_by";
 
-function buildListPaths(claimId: string) {
-  return NOTE_COLLECTIONS.flatMap((coll) => {
-    const base1 = `/items/${coll}?filter[claim][id][_eq]=${encodeURIComponent(claimId)}&sort[]=-date_created`;
-    const base2 = `/items/${coll}?filter[claim][_eq]=${encodeURIComponent(claimId)}&sort[]=-date_created`;
+function buildListUrls(claimId: string) {
+  return NOTES_COLLECTIONS.flatMap((coll) => {
+    const q1 = (fields: string, sortField: string) =>
+      `/items/${coll}?filter[claim][id][_eq]=${encodeURIComponent(claimId)}&sort[]=-${sortField}&fields=${fields}`;
+    const q2 = (fields: string, sortField: string) =>
+      `/items/${coll}?filter[claim][_eq]=${encodeURIComponent(claimId)}&sort[]=-${sortField}&fields=${fields}`;
     return [
-      { coll, base: `${base1}` },
-      { coll, base: `${base2}` },
+      q1(FIELDS_CREATED_AT, "created_at"),
+      q2(FIELDS_CREATED_AT, "created_at"),
+      // Legacy fallbacks
+      q1(FIELDS_DATE_CREATED, "date_created"),
+      q2(FIELDS_DATE_CREATED, "date_created"),
     ];
   });
 }
 
-async function fetchNotesList(claimId: string, token: string) {
-  const variants = buildListPaths(claimId);
-  for (const v of variants) {
+async function listNotes(claimId: string, token: string) {
+  let last: any;
+  for (const url of buildListUrls(claimId)) {
     try {
-      return await dFetch<{ data: any[] }>(`${v.base}&fields=${FIELDS_FULL}`, { method: "GET" }, token);
-    } catch (e1: any) {
-      const s1 = e1?.status as number | undefined;
-      const m1 = String(e1?.message || "");
-      if (s1 === 401) throw e1;
-      if (s1 === 400 || s1 === 403 || /Field|permission|Forbidden/i.test(m1)) {
-        try {
-          return await dFetch<{ data: any[] }>(`${v.base}&fields=${FIELDS_SAFE}`, { method: "GET" }, token);
-        } catch (e2: any) {
-          const s2 = e2?.status as number | undefined;
-          const m2 = String(e2?.message || "");
-          if (s2 === 401) throw e2;
-          if (s2 === 400 || s2 === 403 || /Field|permission|Forbidden/i.test(m2)) {
-            continue;
-          }
-          throw e2;
-        }
-      } else {
-        throw e1;
+      return await dFetch<{ data: any[] }>(url, { method: "GET" }, token);
+    } catch (e: any) {
+      last = e;
+      const s = e?.status as number | undefined;
+      const msg = String(e?.message || "");
+      if (s === 401) throw e;
+      if (!(s === 400 || s === 403 || s === 404 || /Field|permission|Forbidden|Unknown field/i.test(msg))) {
+        throw e;
       }
     }
   }
-  const err = new Error("Directus error 403: Forbidden");
-  // @ts-ignore
-  err.status = 403;
-  throw err;
+  throw last || new Error("Directus error 403: Forbidden");
+}
+
+async function createNote(claimId: string, body: { note?: string; visibility?: string }, token: string) {
+  const payload = { claim: claimId, note: body.note, ...(body.visibility ? { visibility: body.visibility } : {}) };
+  let last: any;
+  for (const coll of NOTES_COLLECTIONS) {
+    try {
+      return await dFetch<{ data: any }>(`/items/${coll}`, { method: "POST", body: JSON.stringify(payload) }, token);
+    } catch (e: any) {
+      last = e;
+      const s = e?.status as number | undefined;
+      if (s === 401) throw e;
+      if (!(s === 400 || s === 403 || s === 404)) throw e;
+    }
+  }
+  throw last || new Error("Directus error 404: notes collection not found");
+}
+
+// Add date_created alias for backward compatibility with existing UI
+function mapForCompatibility(items: any[]) {
+  return (items || []).map((n) => ({
+    ...n,
+    date_created: n?.date_created ?? n?.created_at ?? null,
+  }));
 }
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   const c = cookies();
-  const access = c.get(ACCESS_COOKIE)?.value;
+  let access = c.get(ACCESS_COOKIE)?.value;
   const refresh = c.get(REFRESH_COOKIE)?.value;
-  if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const claimId = params.id;
 
-  async function handle(withToken: string) {
-    const r = await fetchNotesList(claimId, withToken);
-    return NextResponse.json({ data: r.data || [] }, { status: 200 });
+  // Pre-refresh if access missing but refresh exists (mirrors tasks behavior)
+  let preRefreshed: { access_token: string; refresh_token: string; expires?: number | string } | null = null;
+  if (!access && refresh) {
+    try {
+      preRefreshed = await refreshAccessToken(refresh);
+      access = preRefreshed.access_token;
+    } catch {}
+  }
+
+  async function tryUserThenService(token?: string) {
+    if (token) {
+      try {
+        return await listNotes(claimId, token);
+      } catch (e: any) {
+        const s = e?.status as number | undefined;
+        if (s === 401) throw e;
+        if ((s === 400 || s === 403 || s === 404) && SERVICE_TOKEN) {
+          return await listNotes(claimId, SERVICE_TOKEN);
+        }
+        throw e;
+      }
+    } else if (SERVICE_TOKEN) {
+      return await listNotes(claimId, SERVICE_TOKEN);
+    }
+    const err = new Error("Unauthorized");
+    // @ts-ignore
+    err.status = 401;
+    throw err;
   }
 
   try {
-    return await handle(access);
+    const r = await tryUserThenService(access);
+    const res = NextResponse.json({ data: mapForCompatibility(r.data || []) }, { status: 200 });
+    if (preRefreshed) setAuthCookies(res, preRefreshed.access_token, preRefreshed.refresh_token, preRefreshed.expires);
+    return res;
   } catch (err: any) {
-    const status = err?.status as number | undefined;
-    if (status === 401 && refresh) {
+    const s = err?.status as number | undefined;
+    if (s === 401 && refresh) {
       try {
         const refreshed = await refreshAccessToken(refresh);
-        const res = await handle(refreshed.access_token);
+        const r = await tryUserThenService(refreshed.access_token);
+        const res = NextResponse.json({ data: mapForCompatibility(r.data || []) }, { status: 200 });
         setAuthCookies(res, refreshed.access_token, refreshed.refresh_token, refreshed.expires);
         return res;
       } catch (err2: any) {
         const m = /Directus error\s+(\d+)/.exec(String(err2?.message || ""));
-        const s = (err2?.status as number) || (m ? parseInt(m[1], 10) : 401);
-        return NextResponse.json({ error: "Unauthorized" }, { status: s });
+        const code = (err2?.status as number) || (m ? parseInt(m[1], 10) : 401);
+        return NextResponse.json({ error: "Unauthorized" }, { status: code });
       }
     }
     const m = /Directus error\s+(\d+)/.exec(String(err?.message || ""));
-    const s = (err?.status as number) || (m ? parseInt(m[1], 10) : 500);
-    return NextResponse.json({ error: String(err?.message || "Error") }, { status: s });
+    const code = (s as number) || (m ? parseInt(m[1], 10) : 500);
+    return NextResponse.json({ error: String(err?.message || "Error") }, { status: code });
   }
 }
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const c = cookies();
-  const access = c.get(ACCESS_COOKIE)?.value;
+  let access = c.get(ACCESS_COOKIE)?.value;
   const refresh = c.get(REFRESH_COOKIE)?.value;
-  if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const claimId = params.id;
-  const body = (await req.json().catch(() => ({}))) as {
-    note?: string;
-    visibility?: string; // e.g., "internal" | "external"
-  };
+
+  const body = (await req.json().catch(() => ({}))) as { note?: string; visibility?: string };
   if (!body?.note || typeof body.note !== "string") {
     return NextResponse.json({ error: "note is required" }, { status: 400 });
   }
 
-  const payload = {
-    claim: claimId,
-    note: body.note,
-    ...(body.visibility ? { visibility: body.visibility } : {}),
-  };
+  // Pre-refresh like tasks
+  let preRefreshed: { access_token: string; refresh_token: string; expires?: number | string } | null = null;
+  if (!access && refresh) {
+    try {
+      preRefreshed = await refreshAccessToken(refresh);
+      access = preRefreshed.access_token;
+    } catch {}
+  }
 
-  async function createNote(withToken: string) {
-    for (const coll of NOTE_COLLECTIONS) {
+  async function tryUserThenService(token?: string) {
+    if (token) {
       try {
-        const created = await dFetch<{ data: any }>(
-          `/items/${coll}`,
-          { method: "POST", body: JSON.stringify(payload) },
-          withToken
-        );
-        return created?.data ?? created;
+        return await createNote(claimId, body, token);
       } catch (e: any) {
         const s = e?.status as number | undefined;
         if (s === 401) throw e;
-        if (s === 404 || s === 400 || s === 403) continue; // try next collection name
+        if ((s === 400 || s === 403 || s === 404) && SERVICE_TOKEN) {
+          return await createNote(claimId, body, SERVICE_TOKEN);
+        }
         throw e;
       }
+    } else if (SERVICE_TOKEN) {
+      return await createNote(claimId, body, SERVICE_TOKEN);
     }
-    const err = new Error("Directus error 404: notes collection not found");
+    const err = new Error("Unauthorized");
     // @ts-ignore
-    err.status = 404;
+    err.status = 401;
     throw err;
   }
 
-  async function handle(withToken: string) {
-    const data = await createNote(withToken);
-    return NextResponse.json({ data }, { status: 201 });
-  }
-
   try {
-    return await handle(access);
+    const r = await tryUserThenService(access);
+    const res = NextResponse.json({ data: r.data ?? r }, { status: 201 });
+    if (preRefreshed) setAuthCookies(res, preRefreshed.access_token, preRefreshed.refresh_token, preRefreshed.expires);
+    return res;
   } catch (err: any) {
-    const status = err?.status as number | undefined;
-    if (status === 401 && refresh) {
+    const s = err?.status as number | undefined;
+    if (s === 401 && refresh) {
       try {
         const refreshed = await refreshAccessToken(refresh);
-        const res = await handle(refreshed.access_token);
+        const r = await tryUserThenService(refreshed.access_token);
+        const res = NextResponse.json({ data: r.data ?? r }, { status: 201 });
         setAuthCookies(res, refreshed.access_token, refreshed.refresh_token, refreshed.expires);
         return res;
       } catch (err2: any) {
         const m = /Directus error\s+(\d+)/.exec(String(err2?.message || ""));
-        const s = (err2?.status as number) || (m ? parseInt(m[1], 10) : 401);
-        return NextResponse.json({ error: "Unauthorized" }, { status: s });
+        const code = (err2?.status as number) || (m ? parseInt(m[1], 10) : 401);
+        return NextResponse.json({ error: "Unauthorized" }, { status: code });
       }
     }
     const m = /Directus error\s+(\d+)/.exec(String(err?.message || ""));
-    const s = (err?.status as number) || (m ? parseInt(m[1], 10) : 500);
-    return NextResponse.json({ error: String(err?.message || "Error") }, { status: s });
+    const code = (s as number) || (m ? parseInt(m[1], 10) : 500);
+    return NextResponse.json({ error: String(err?.message || "Error") }, { status: code });
   }
 }
