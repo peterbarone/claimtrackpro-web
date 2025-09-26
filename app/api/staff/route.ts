@@ -54,3 +54,26 @@ export async function GET() {
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
   }
 }
+
+const CREATABLE_FIELDS = new Set(['first_name','last_name','email','role']);
+
+export async function POST(req: Request) {
+  let body: any = {};
+  try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
+  const payload: Record<string, any> = {};
+  for (const k of Object.keys(body || {})) {
+    if (CREATABLE_FIELDS.has(k) && body[k] !== undefined && body[k] !== null) payload[k] = body[k];
+  }
+  if (!payload.first_name && !payload.last_name) {
+    return NextResponse.json({ error: 'first_name or last_name required' }, { status: 400 });
+  }
+  try {
+    const res = await dx(`/items/staff`, { method: 'POST', body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return NextResponse.json({ error: 'Create failed', detail: data }, { status: res.status || 500 });
+    const item: any = data.data || data;
+    return NextResponse.json({ data: { id: item.id, name: `${item.first_name || ''} ${item.last_name || ''}`.trim() || item.id } }, { status: 201 });
+  } catch (e:any) {
+    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 });
+  }
+}

@@ -31,6 +31,10 @@ function buildClaimPath(id: string, includeAddressLines = true) {
     'assigned_to_user.first_name',
     'assigned_to_user.last_name',
     'assigned_to_user.email',
+  // assigned manager (contacts collection presumed)
+  'assigned_manager.id',
+  'assigned_manager.first_name',
+  'assigned_manager.last_name',
     // participants relation (junction like claims_contacts)
     'claims_contacts.id',
     'claims_contacts.role',
@@ -133,6 +137,7 @@ const MUTABLE_FIELDS = new Set([
   'description',
   'status', // expects id or raw status id; Directus relation field name
   'assigned_to_user', // expects staff id
+  'assigned_manager', // expects contact id
   'date_of_loss',
   'reported_date',
   'claim_type',

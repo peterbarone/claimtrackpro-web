@@ -570,6 +570,7 @@ export default function ClaimDetailsClient() {
               description: claimData.description ?? "",
               statusId: claimData?.status?.id ?? null,
               assignedToUserId: claimData?.assigned_to_user?.id ?? null,
+              assignedManagerId: claimData?.assigned_manager?.id ?? null,
               dateOfLoss: claimData?.date_of_loss ?? null,
               claimTypeId: claimData?.claim_type?.id ?? null,
               participants: Array.isArray(claimData?.claims_contacts)

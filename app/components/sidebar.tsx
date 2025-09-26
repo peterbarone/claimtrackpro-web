@@ -10,19 +10,21 @@ import {
   FileText as FileTextIcon,
   Settings as SettingsIcon,
   User as UserIcon,
+  Users as UsersIcon,
 } from "lucide-react";
 
 interface SidebarProps {
   isOpen: boolean;
-  onToggle: () => void;
+  onToggleAction: () => void;
   isCollapsed?: boolean;
-  onToggleCollapse?: () => void;
+  onToggleCollapseAction?: () => void;
 }
 
 const navigationItems = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboardIcon },
   { name: "Claims", href: "/claims", icon: FileTextIcon },
   { name: "Tasks", href: "/tasks", icon: CheckSquareIcon },
+  { name: "Staff", href: "/staff", icon: UsersIcon },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
@@ -32,9 +34,9 @@ const bottomNavigationItems = [
 
 export function Sidebar({
   isOpen,
-  onToggle,
+  onToggleAction,
   isCollapsed = false,
-  onToggleCollapse,
+  onToggleCollapseAction,
 }: SidebarProps) {
   return (
     <>
@@ -42,7 +44,7 @@ export function Sidebar({
       {isOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-          onClick={onToggle}
+          onClick={onToggleAction}
           aria-hidden="true"
         />
       )}
@@ -69,11 +71,11 @@ export function Sidebar({
             </h2>
           )}
           <div className="flex items-center space-x-2">
-            {onToggleCollapse && (
+            {onToggleCollapseAction && (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={onToggleCollapse}
+                onClick={onToggleCollapseAction}
                 className="hidden lg:flex"
                 aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               >
@@ -83,7 +85,7 @@ export function Sidebar({
             <Button
               variant="ghost"
               size="sm"
-              onClick={onToggle}
+              onClick={onToggleAction}
               className="lg:hidden"
               aria-label="Close sidebar"
             >
@@ -116,7 +118,7 @@ export function Sidebar({
                         typeof window !== "undefined" &&
                         window.innerWidth < 1024
                       ) {
-                        onToggle();
+                        onToggleAction();
                       }
                     }}
                     title={isCollapsed ? item.name : undefined}
@@ -159,7 +161,7 @@ export function Sidebar({
                         typeof window !== "undefined" &&
                         window.innerWidth < 1024
                       ) {
-                        onToggle();
+                        onToggleAction();
                       }
                     }}
                     title={isCollapsed ? item.name : undefined}
@@ -183,12 +185,16 @@ export function Sidebar({
   );
 }
 
-export function SidebarToggle({ onToggle }: { onToggle: () => void }) {
+export function SidebarToggle({
+  onToggleAction,
+}: {
+  onToggleAction: () => void;
+}) {
   return (
     <Button
       variant="ghost"
       size="sm"
-      onClick={onToggle}
+      onClick={onToggleAction}
       className="lg:hidden"
       aria-label="Open sidebar"
     >
