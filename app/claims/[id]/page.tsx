@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ClaimInfoHeader } from "@/components/claim-info-header";
 import { ProgressBar } from "@/components/progress-bar";
@@ -191,192 +191,165 @@ export default function ClaimDetailsClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimId]);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      if (!claimId) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/claims/${encodeURIComponent(claimId)}`, {
-          method: "GET",
-          cache: "no-store",
-        });
-        if (res.status === 401) {
-          router.push("/login");
-          return;
-        }
-        if (!res.ok) {
-          if (res.status === 404) {
-            setError("Claim not found");
-          } else {
-            const body = await res.json().catch(() => ({} as any));
-            setError(body?.detail || body?.error || `Failed (${res.status})`);
-          }
-          return;
-        }
-        const body = await res.json();
-        const claim = body?.data;
-        if (!claim) {
-          setError("Missing claim data");
-          return;
-        }
-
-        // Helpers
-        const personToName = (
-          p?: { first_name?: string; last_name?: string } | null
-        ) => {
-          const first = (p?.first_name || "").trim();
-          const last = (p?.last_name || "").trim();
-          const full = `${first} ${last}`.trim();
-          return full || "Unknown";
-        };
-        const fmtDate = (d?: string | null) => {
-          if (!d) return "";
-          const date = new Date(d);
-          return isNaN(date.getTime())
-            ? ""
-            : date.toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              });
-        };
-        const daysBetween = (start?: string | null, end: Date = new Date()) => {
-          if (!start) return 0;
-          const s = new Date(start);
-          if (isNaN(s.getTime())) return 0;
-          const diffMs = end.getTime() - s.getTime();
-          return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-        };
-        const toHeaderStatus = (
-          s?: string | null
-        ): "open" | "in-review" | "closed" | "pending" => {
-          const v = (s || "").toLowerCase();
-          if (v.includes("clos")) return "closed";
-          if (v.includes("review") || v.includes("approv")) return "in-review";
-          if (v.includes("hold") || v.includes("pend")) return "pending";
-          return "open";
-        };
-        const lossLocationToString = (loc?: any) => {
-          if (!loc) return "";
-          const line = [loc.street_1, loc.street_2].filter(Boolean).join(" ");
-          const cityStateZip = [loc.city, loc.state, loc.postal_code]
-            .filter(Boolean)
-            .join(", ")
-            .replace(/,\s+,/g, ", ");
-          return [line, cityStateZip].filter(Boolean).join(", ");
-        };
-
-        // Map to header
-        const mappedHeader: HeaderProps = {
-          claimNumber: claim.claim_number || claim.id || "",
-          insuredName: personToName(claim.primary_insured),
-          daysOpen: daysBetween(claim.date_created),
-          status: toHeaderStatus(
-            claim?.status?.name || claim?.status?.status || claim?.status?.code
-          ),
-          claimContacts: [
-            { name: personToName(claim.primary_insured), role: "Insured" },
-            claim.assigned_to_user
-              ? {
-                  name: personToName(claim.assigned_to_user),
-                  role: "Assigned Adjuster",
-                }
-              : null,
-          ].filter(Boolean) as Array<{ name: string; role: string }>,
-          lossAddress: lossLocationToString(claim.loss_location),
-          mailingAddress: lossLocationToString(claim.loss_location),
-          dateOfLoss: fmtDate(claim.date_of_loss),
-          dateReceived: fmtDate(claim.reported_date || claim.date_created),
-          clientCompany: "",
-          clientContact: "",
-          participants: [
-            {
-              id: "insured",
-              name: personToName(claim.primary_insured),
-              role: "Insured",
-            },
-            claim.assigned_to_user
-              ? {
-                  id: String(claim.assigned_to_user.id ?? "assignee"),
-                  name: personToName(claim.assigned_to_user),
-                  role: "Assigned Adjuster",
-                }
-              : null,
-          ].filter(Boolean) as Array<{
-            id: string;
-            name: string;
-            role: string;
-          }>,
-        };
-
-        // Simple synthetic milestones/timeline for now
-        const mappedMilestones: Milestone[] = [
-          {
-            id: "reported",
-            label: "Reported",
-            date: fmtDate(claim.reported_date || claim.date_created),
-            completed: true,
-          },
-          {
-            id: "assigned",
-            label: "Assigned",
-            date: fmtDate(claim.date_created),
-            completed: !!claim.assigned_to_user,
-          },
-          {
-            id: "inspection",
-            label: "Inspection",
-            date: "",
-            completed: false,
-          },
-          {
-            id: "estimate",
-            label: "Estimate",
-            date: "",
-            completed: false,
-          },
-          {
-            id: "closed",
-            label: "Closed",
-            date: "",
-            completed: mappedHeader.status === "closed",
-          },
-        ];
-
-        const nowIso = new Date().toISOString();
-        const mappedTimeline: UITimelineItem[] = [
-          {
-            id: "evt-created",
-            action: "Claim Created",
-            description: claim.description || "",
-            timestamp: claim.date_created || nowIso,
-            user: personToName(claim.assigned_to_user) || "System",
-            type: "status",
-            status: mappedHeader.status,
-          },
-        ];
-
-        const mappedTasks: ActiveTask[] = [];
-
-        if (!cancelled) {
-          setHeader(mappedHeader);
-          setMilestones(mappedMilestones);
-          setTimeline(mappedTimeline);
-          setTasks([]); // Ensure tasks are reset to an empty array
-        }
-      } catch (e) {
-        if (!cancelled) setError(e?.message || "Failed to load claim");
-      } finally {
-        if (!cancelled) setLoading(false);
+  const loadClaimAndHeader = useCallback(async () => {
+    if (!claimId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/claims/${encodeURIComponent(claimId)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (res.status === 401) {
+        router.push("/login");
+        return;
       }
+      if (!res.ok) {
+        if (res.status === 404) setError("Claim not found");
+        else {
+          const body = await res.json().catch(() => ({} as any));
+          setError(body?.detail || body?.error || `Failed (${res.status})`);
+        }
+        return;
+      }
+      const body = await res.json();
+      const claim = body?.data;
+      if (!claim) {
+        setError("Missing claim data");
+        return;
+      }
+      const personToName = (
+        p?: { first_name?: string; last_name?: string } | null
+      ) => {
+        const first = (p?.first_name || "").trim();
+        const last = (p?.last_name || "").trim();
+        const full = `${first} ${last}`.trim();
+        return full || "Unknown";
+      };
+      const fmtDate = (d?: string | null) => {
+        if (!d) return "";
+        const date = new Date(d);
+        return isNaN(date.getTime())
+          ? ""
+          : date.toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            });
+      };
+      const daysBetween = (start?: string | null, end: Date = new Date()) => {
+        if (!start) return 0;
+        const s = new Date(start);
+        if (isNaN(s.getTime())) return 0;
+        return Math.max(
+          0,
+          Math.floor((end.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
+        );
+      };
+      const toHeaderStatus = (
+        s?: string | null
+      ): "open" | "in-review" | "closed" | "pending" => {
+        const v = (s || "").toLowerCase();
+        if (v.includes("clos")) return "closed";
+        if (v.includes("review") || v.includes("approv")) return "in-review";
+        if (v.includes("hold") || v.includes("pend")) return "pending";
+        return "open";
+      };
+      const lossLocationToString = (loc?: any) => {
+        if (!loc) return "";
+        const line = [loc.street_1, loc.street_2].filter(Boolean).join(" ");
+        const cityStateZip = [loc.city, loc.state, loc.postal_code]
+          .filter(Boolean)
+          .join(", ")
+          .replace(/,\s+,/g, ", ");
+        return [line, cityStateZip].filter(Boolean).join(", ");
+      };
+      const mappedHeader: HeaderProps = {
+        claimNumber: claim.claim_number || claim.id || "",
+        insuredName: personToName(claim.primary_insured),
+        daysOpen: daysBetween(claim.date_created),
+        status: toHeaderStatus(
+          claim?.status?.name || claim?.status?.status || claim?.status?.code
+        ),
+        claimContacts: [
+          { name: personToName(claim.primary_insured), role: "Insured" },
+          claim.assigned_to_user
+            ? {
+                name: personToName(claim.assigned_to_user),
+                role: "Assigned Adjuster",
+              }
+            : null,
+        ].filter(Boolean) as Array<{ name: string; role: string }>,
+        lossAddress: lossLocationToString(claim.loss_location),
+        mailingAddress: lossLocationToString(claim.loss_location),
+        dateOfLoss: fmtDate(claim.date_of_loss),
+        dateReceived: fmtDate(claim.reported_date || claim.date_created),
+        clientCompany: "",
+        clientContact: "",
+        participants: [
+          {
+            id: "insured",
+            name: personToName(claim.primary_insured),
+            role: "Insured",
+          },
+          claim.assigned_to_user
+            ? {
+                id: String(claim.assigned_to_user.id ?? "assignee"),
+                name: personToName(claim.assigned_to_user),
+                role: "Assigned Adjuster",
+              }
+            : null,
+        ].filter(Boolean) as Array<{ id: string; name: string; role: string }>,
+      };
+      const mappedMilestones: Milestone[] = [
+        {
+          id: "reported",
+          label: "Reported",
+          date: fmtDate(claim.reported_date || claim.date_created),
+          completed: true,
+        },
+        {
+          id: "assigned",
+          label: "Assigned",
+          date: fmtDate(claim.date_created),
+          completed: !!claim.assigned_to_user,
+        },
+        { id: "inspection", label: "Inspection", date: "", completed: false },
+        { id: "estimate", label: "Estimate", date: "", completed: false },
+        {
+          id: "closed",
+          label: "Closed",
+          date: "",
+          completed: mappedHeader.status === "closed",
+        },
+      ];
+      setHeader(mappedHeader);
+      setMilestones(mappedMilestones);
+    } catch (e) {
+      setError(e?.message || "Failed to load claim");
+    } finally {
+      setLoading(false);
     }
-    load();
-    return () => {
-      cancelled = true;
-    };
   }, [claimId, router]);
+
+  const loadTimeline = useCallback(async () => {
+    if (!claimId) return;
+    try {
+      const r = await fetch(
+        `/api/claims/${encodeURIComponent(claimId)}/timeline`,
+        { cache: "no-store" }
+      );
+      if (!r.ok) return;
+      const json = await r.json();
+      const list = Array.isArray(json?.data) ? json.data : [];
+      setTimeline(list as UITimelineItem[]);
+    } catch {}
+  }, [claimId]);
+
+  useEffect(() => {
+    loadClaimAndHeader();
+    loadTimeline();
+  }, [loadClaimAndHeader, loadTimeline]);
 
   const filteredEvents = useMemo(() => {
     if (!searchQuery.trim()) return timeline;
@@ -532,6 +505,7 @@ export default function ClaimDetailsClient() {
           claimId={String(claimId)}
           onCreated={async () => {
             await refreshTasks();
+            await loadTimeline(); // reflect new task in timeline
             setAddTaskOpen(false);
           }}
         />
@@ -547,6 +521,7 @@ export default function ClaimDetailsClient() {
           claimId={String(claimId)}
           onCreatedAction={async () => {
             await refreshNotes();
+            await loadTimeline(); // reflect new note
             setAddNoteOpen(false);
           }}
         />
@@ -562,6 +537,7 @@ export default function ClaimDetailsClient() {
           claimId={String(claimId)}
           onUploadedAction={async () => {
             await refreshFiles();
+            await loadTimeline(); // reflect new document
             setUploadOpen(false);
           }}
         />

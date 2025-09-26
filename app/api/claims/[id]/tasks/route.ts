@@ -100,9 +100,9 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   const base1 = `/items/claim_tasks?filter[claim][id][_eq]=${encodeURIComponent(params.id)}&sort[]=-date_created`;
   const base2 = `/items/claim_tasks?filter[claim][_eq]=${encodeURIComponent(params.id)}&sort[]=-date_created`;
   const fieldsFull =
-    "id,claim,status,priority,assignee.id,assignee.name,title,details,due_date,date_created";
+    "id,claim,status,priority,assignee.id,assignee.name,title,details,due_date,date_created,created_by.first_name,created_by.last_name";
   const fieldsSafe =
-    "id,claim,status,priority,assignee,title,details,due_date,date_created";
+    "id,claim,status,priority,assignee,title,details,due_date,date_created,created_by";
 
   async function fetchTasks(withToken: string) {
     // Try full fields + base1 → fallback fields → fallback base2
