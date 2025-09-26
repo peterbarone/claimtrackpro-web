@@ -31,6 +31,12 @@ function buildClaimPath(id: string, includeAddressLines = true) {
     'assigned_to_user.first_name',
     'assigned_to_user.last_name',
     'assigned_to_user.email',
+    // participants relation (junction like claims_contacts)
+    'claims_contacts.id',
+    'claims_contacts.role',
+    'claims_contacts.contacts_id.id',
+    'claims_contacts.contacts_id.first_name',
+    'claims_contacts.contacts_id.last_name',
   ];
   const qs = new URLSearchParams();
   qs.set('fields', FIELDS.join(','));
@@ -114,5 +120,99 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'Internal Server Error', detail: String(msg).slice(0, 300) }, { status: 500 });
   } finally {
     console.timeEnd?.(label);
+  }
+}
+
+// --- PATCH (Update Claim) ----------------------------------------------------
+// Accepts partial updates. Only whitelisted fields are forwarded to Directus.
+// Body JSON example:
+// { "description": "Updated desc", "status": "open", "assigned_to_user": 5, "date_of_loss": "2025-09-15" }
+// For status: client may send either a status id (numeric/string) or an object { id }.
+
+const MUTABLE_FIELDS = new Set([
+  'description',
+  'status', // expects id or raw status id; Directus relation field name
+  'assigned_to_user', // expects staff id
+  'date_of_loss',
+  'reported_date',
+  'claim_type',
+]);
+
+function sanitizePayload(body: any) {
+  const out: Record<string, any> = {};
+  if (!body || typeof body !== 'object') return out;
+  for (const k of Object.keys(body)) {
+    if (!MUTABLE_FIELDS.has(k)) continue;
+    const v = body[k];
+    if (v === undefined) continue;
+    // Normalize objects { id } to id value for simple relation updates
+    if (v && typeof v === 'object' && 'id' in v && Object.keys(v).length === 1) {
+      out[k] = v.id;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+  const id = params.id;
+  const jar = cookies();
+  const access = jar.get(COOKIE_NAME)?.value;
+  const refresh = jar.get(REFRESH_COOKIE_NAME)?.value;
+  if (!access && !refresh) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  let body: any = null;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+  const payload = sanitizePayload(body);
+  if (Object.keys(payload).length === 0) {
+    return NextResponse.json({ error: 'No updatable fields provided' }, { status: 400 });
+  }
+
+  async function attempt(token?: string) {
+    if (!token) throw new Error('401');
+    return await directusFetch(
+      `/items/claims/${encodeURIComponent(id)}`,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
+      token
+    );
+  }
+
+  let token = access;
+  try {
+    let updated: any;
+    try {
+      updated = await attempt(token);
+    } catch (err: any) {
+      if (String(err.message).includes('401') && refresh) {
+        // try refresh
+        if (!DIRECTUS_URL) throw new Error('Missing DIRECTUS_URL');
+        const r = await fetch(`${DIRECTUS_URL}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refresh }),
+          cache: 'no-store',
+        });
+        if (!r.ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        const json = await r.json();
+        token = json?.data?.access_token;
+        if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        updated = await attempt(token);
+      } else {
+        throw err;
+      }
+    }
+    return NextResponse.json({ data: updated?.data ?? updated }, { status: 200 });
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (msg.includes('401')) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (msg.includes('403')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (msg.includes('404')) return NextResponse.json({ error: 'Not Found' }, { status: 404 });
+    return NextResponse.json({ error: 'Update Failed', detail: msg.slice(0, 300) }, { status: 500 });
   }
 }

@@ -18,6 +18,7 @@ import { ClaimNoteForm } from "@/components/claim-note-form";
 import { NotesPanel, NoteItem } from "@/components/notes-panel";
 import { FilesPanel, ClaimFile } from "@/components/files-panel";
 import { FileUploadForm } from "@/components/file-upload-form";
+import { ClaimEditForm } from "@/components/claim-edit-form";
 
 /* ========= Inline shared types (no server import needed) ========= */
 type HeaderProps = {
@@ -70,6 +71,8 @@ export default function ClaimDetailsClient() {
   const [error, setError] = useState<string | null>(null);
 
   const [header, setHeader] = useState<HeaderProps | null>(null);
+  // Store full claim response for edit modal initial values
+  const [claimData, setClaimData] = useState<any | null>(null);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [timeline, setTimeline] = useState<UITimelineItem[]>([]);
   const [tasks, setTasks] = useState<ActiveTask[]>([]);
@@ -81,6 +84,7 @@ export default function ClaimDetailsClient() {
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [addNoteOpen, setAddNoteOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   async function refreshTasks() {
     if (!claimId) return;
@@ -218,6 +222,8 @@ export default function ClaimDetailsClient() {
         setError("Missing claim data");
         return;
       }
+      // Keep raw claim for edit form initial values (description, status, etc.)
+      setClaimData(claim);
       const personToName = (
         p?: { first_name?: string; last_name?: string } | null
       ) => {
@@ -415,6 +421,14 @@ export default function ClaimDetailsClient() {
           <h1 className="text-3xl font-bold text-gray-900">
             {header?.claimNumber || ""}
           </h1>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setEditOpen(true)}
+              className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50"
+            >
+              Edit Claim
+            </button>
+          </div>
         </div>
 
         {/* Polymet Header */}
@@ -541,6 +555,45 @@ export default function ClaimDetailsClient() {
             setUploadOpen(false);
           }}
         />
+      </Modal>
+
+      {/* Edit Claim Modal */}
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title="Edit Claim"
+      >
+        {header && claimData && (
+          <ClaimEditForm
+            claimId={String(claimId)}
+            initial={{
+              description: claimData.description ?? "",
+              statusId: claimData?.status?.id ?? null,
+              assignedToUserId: claimData?.assigned_to_user?.id ?? null,
+              dateOfLoss: claimData?.date_of_loss ?? null,
+              claimTypeId: claimData?.claim_type?.id ?? null,
+              participants: Array.isArray(claimData?.claims_contacts)
+                ? claimData.claims_contacts.map((cc: any) => ({
+                    id: String(cc.id), // junction id used for remove
+                    role: cc.role || "",
+                    contactId: cc?.contacts_id?.id
+                      ? String(cc.contacts_id.id)
+                      : "",
+                    name:
+                      [cc?.contacts_id?.first_name, cc?.contacts_id?.last_name]
+                        .filter(Boolean)
+                        .join(" ") || "Unknown",
+                  }))
+                : [],
+            }}
+            onSavedAction={async () => {
+              await loadClaimAndHeader();
+              await loadTimeline();
+              setEditOpen(false);
+            }}
+            onCancelAction={() => setEditOpen(false)}
+          />
+        )}
       </Modal>
     </AppShell>
   );
