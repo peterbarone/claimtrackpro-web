@@ -13,7 +13,7 @@ export function FileUploadForm({
   onUploadedAction?: () => Promise<void> | void;
 }) {
   const [file, setFile] = useState<File | null>(null);
-  const [visibility, setVisibility] = useState<string>("internal");
+  const [category, setCategory] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +28,7 @@ export function FileUploadForm({
     try {
       const fd = new FormData();
       fd.append("file", file);
-      if (visibility) fd.append("visibility", visibility);
+      if (category) fd.append("category", category);
       const r = await fetch(
         `/api/claims/${encodeURIComponent(claimId)}/files`,
         {
@@ -42,6 +42,7 @@ export function FileUploadForm({
       }
       if (onUploadedAction) await onUploadedAction();
       setFile(null);
+      setCategory("");
     } catch (e) {
       setError(String(e?.message || "Upload failed"));
     } finally {
@@ -61,18 +62,14 @@ export function FileUploadForm({
         />
       </div>
       <div>
-        <Label htmlFor="visibility">Visibility</Label>
-        <select
-          id="visibility"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md"
-          value={visibility}
-          onChange={(e) => setVisibility(e.target.value)}
+        <Label htmlFor="category">Category (optional)</Label>
+        <Input
+          id="category"
+          placeholder="e.g. photo, estimate, report"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
           disabled={loading}
-        >
-          <option value="internal">internal</option>
-          <option value="external">external</option>
-          <option value="private">private</option>
-        </select>
+        />
       </div>
       {error ? <div className="text-sm text-red-600">{error}</div> : null}
       <div className="flex justify-end">

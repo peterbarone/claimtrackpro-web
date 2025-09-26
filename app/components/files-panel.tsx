@@ -5,15 +5,17 @@ import { Button } from "@/components/ui/button";
 
 export type ClaimFile = {
   id: string;
-  visibility: string | null;
-  created_at: string | null;
-  created_by: string | null;
+  claim: string | number | null;
+  category: string | null;
+  uploaded_at: string | null;
+  uploaded_by: string | null; // user id
+  uploader_name?: string | null; // convenience from API mapping
   file: {
     id: string | null;
     title: string | null;
-    filename: string | null;
+    filename_download: string | null;
     type: string | null;
-    size: number | null;
+    filesize: number | null;
     uploaded_on: string | null;
     download_url: string | null;
     directus_url: string | null;
@@ -40,20 +42,21 @@ export function FilesPanel({ files }: { files: ClaimFile[] }) {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-medium text-gray-900">
-                  {f.file.title || f.file.filename || "Untitled"}
+                  {f.file.title || f.file.filename_download || "Untitled"}
                 </span>
-                {f.visibility && (
-                  <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-800">
-                    {f.visibility}
+                {f.category && (
+                  <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-800">
+                    {f.category}
                   </span>
                 )}
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 {f.file.type || "file"} ·{" "}
-                {f.file.size
-                  ? `${Math.round(f.file.size / 1024)} KB`
+                {f.file.filesize
+                  ? `${Math.round(f.file.filesize / 1024)} KB`
                   : "size unknown"}{" "}
-                · {f.created_at ?? f.file.uploaded_on ?? ""}
+                · {f.uploaded_at || f.file.uploaded_on || ""}
+                {f.uploader_name && ` · ${f.uploader_name}`}
               </div>
             </div>
             <div className="flex items-center gap-2">

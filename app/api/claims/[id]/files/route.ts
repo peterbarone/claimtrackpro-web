@@ -15,6 +15,7 @@ const SERVICE_TOKEN =
   process.env.DIRECTUS_ADMIN_TOKEN ||
   "";
 const DIRECTUS_FILES_FOLDER_ID = process.env.DIRECTUS_FILES_FOLDER_ID || "";
+const COLLECTION = "claim_documents"; // Actual collection name
 
 function isLocal() {
   try {
@@ -46,14 +47,8 @@ async function dFetch<T = any>(path: string, init: RequestInit = {}, token?: str
     const err = new Error(`Directus error ${r.status}: ${txt || r.statusText}`);
     // @ts-ignore
     err.status = r.status;
-    // @ts-ignore
-    err.body = txt;
     throw err;
   }
-  const ct = r.headers.get("content-type") || "";
-  if (/application\/json/i.test(ct)) return (await r.json()) as T;
-  // allow callers to handle non-JSON if needed
-  // @ts-ignore
   return (await r.json()) as T;
 }
 
@@ -94,33 +89,21 @@ function setAuthCookies(res: NextResponse, access: string, refresh: string, expi
   res.cookies.set(REFRESH_COOKIE, refresh, { ...opts, ...(maxAge ? { maxAge: maxAge * 12 } : {}) });
 }
 
-const JUNCTION_COLLECTIONS = ["claim_files", "claims_files", "claim_documents", "claims_documents"];
 const FIELDS_FULL =
-  "id,claim,visibility,created_at,created_by,file.id,file.filename_download,file.title,file.type,file.filesize,file.uploaded_on";
-const FIELDS_SAFE = "id,claim,visibility,created_at,created_by,file";
+  "id,claim,category,file.id,file.filename_download,file.title,file.type,file.filesize,file.uploaded_on,uploaded_by.id,uploaded_by.first_name,uploaded_by.last_name,uploaded_at";
+const FIELDS_SAFE = "id,claim,category,file,uploaded_by,uploaded_at";
 
-function buildListUrls(claimId: string) {
-  return JUNCTION_COLLECTIONS.flatMap((coll) => {
-    const q = (fields: string, sortField: string) =>
-      `/items/${coll}?filter[claim][_eq]=${encodeURIComponent(claimId)}&sort[]=-${sortField}&fields=${fields}`;
-    const qRel = (fields: string, sortField: string) =>
-      `/items/${coll}?filter[claim][id][_eq]=${encodeURIComponent(claimId)}&sort[]=-${sortField}&fields=${fields}`;
-    return [
-      q(FIELDS_FULL, "created_at"),
-      qRel(FIELDS_FULL, "created_at"),
-      q(FIELDS_SAFE, "created_at"),
-      qRel(FIELDS_SAFE, "created_at"),
-      q(FIELDS_SAFE, "date_created"),
-      qRel(FIELDS_SAFE, "date_created"),
-    ];
-  });
-}
-
-async function listFiles(claimId: string, token: string) {
+async function listDocuments(claimId: string, token: string) {
+  const urls = [
+    `/items/${COLLECTION}?filter[claim][id][_eq]=${encodeURIComponent(claimId)}&sort[]=-uploaded_at&fields=${FIELDS_FULL}`,
+    `/items/${COLLECTION}?filter[claim][_eq]=${encodeURIComponent(claimId)}&sort[]=-uploaded_at&fields=${FIELDS_FULL}`,
+    `/items/${COLLECTION}?filter[claim][id][_eq]=${encodeURIComponent(claimId)}&sort[]=-uploaded_at&fields=${FIELDS_SAFE}`,
+    `/items/${COLLECTION}?filter[claim][_eq]=${encodeURIComponent(claimId)}&sort[]=-uploaded_at&fields=${FIELDS_SAFE}`,
+  ];
   let last: any;
-  for (const url of buildListUrls(claimId)) {
+  for (const u of urls) {
     try {
-      return await dFetch<{ data: any[] }>(url, { method: "GET" }, token);
+      return await dFetch<{ data: any[] }>(u, { method: "GET" }, token);
     } catch (e: any) {
       last = e;
       const s = e?.status as number | undefined;
@@ -134,56 +117,53 @@ async function listFiles(claimId: string, token: string) {
   throw last || new Error("Directus error 403: Forbidden");
 }
 
-async function uploadDirectusFile(file: File, token: string, extras?: Record<string, any>) {
+async function uploadBinary(file: File, token: string) {
   const fd = new FormData();
   fd.append("file", file, file.name);
   if (DIRECTUS_FILES_FOLDER_ID) fd.append("folder", DIRECTUS_FILES_FOLDER_ID);
-  if (extras) Object.entries(extras).forEach(([k, v]) => v != null && fd.append(k, String(v)));
   return await dFetch<{ data: any }>(`/files`, { method: "POST", body: fd }, token);
 }
 
-async function createJunction(claimId: string, fileId: string, visibility: string | undefined, token: string) {
-  let last: any;
-  const payload = { claim: claimId, file: fileId, ...(visibility ? { visibility } : {}) };
-  for (const coll of JUNCTION_COLLECTIONS) {
-    try {
-      return await dFetch<{ data: any }>(`/items/${coll}`, { method: "POST", body: JSON.stringify(payload) }, token);
-    } catch (e: any) {
-      last = e;
-      const s = e?.status as number | undefined;
-      if (s === 401) throw e;
-      if (!(s === 400 || s === 403 || s === 404)) throw e;
-    }
+async function createDocumentRecord(claimId: string, fileId: string, category: string | undefined, token: string) {
+  const payload: Record<string, any> = { claim: claimId, file: fileId, ...(category ? { category } : {}) };
+  const created = await dFetch<{ data: any }>(`/items/${COLLECTION}`, { method: "POST", body: JSON.stringify(payload) }, token);
+  // refetch with expansions
+  try {
+    const ref = await dFetch<{ data: any }>(
+      `/items/${COLLECTION}/${created.data?.id}?fields=${encodeURIComponent(FIELDS_FULL)}`,
+      { method: "GET" },
+      token
+    );
+    return ref.data || created.data;
+  } catch {
+    return created.data;
   }
-  throw last || new Error("Directus error 404: claim file collection not found");
 }
 
-function mapFiles(items: any[]) {
+function mapDocs(arr: any[]) {
   const base = DIRECTUS_URL;
-  return (items || []).map((it) => {
-    const f = it.file || {};
-    const fileId = f?.id ?? null;
-    const filename = f?.filename_download ?? null;
-    const title = f?.title ?? filename ?? null;
-    const type = f?.type ?? null;
-    const size = f?.filesize ?? null;
-    const uploaded_on = f?.uploaded_on ?? null;
-    const download_url = fileId ? `/api/files/${encodeURIComponent(fileId)}?download=1` : null;
+  return (arr || []).map((d) => {
+    const f = typeof d.file === "object" ? d.file : { id: d.file };
+    const fileId = f?.id || null;
+    const uploaderName =
+      d?.uploaded_by && typeof d.uploaded_by === "object"
+        ? `${d.uploaded_by.first_name || ""} ${d.uploaded_by.last_name || ""}`.trim() || null
+        : null;
     return {
-      id: String(it.id),
-      claim: it.claim ?? null,
-      visibility: it.visibility ?? null,
-      created_at: it.created_at ?? it.date_created ?? null,
-      created_by: it.created_by ?? null,
+      id: d.id,
+      claim: d.claim,
+      category: d.category || null,
+      uploaded_at: d.uploaded_at || null,
+      uploaded_by: d?.uploaded_by?.id || d.uploaded_by || null,
+      uploader_name: uploaderName,
       file: {
         id: fileId,
-        title,
-        filename,
-        type,
-        size,
-        uploaded_on,
-        download_url,
-        // Direct link (may require token)
+        title: f?.title || f?.filename_download || null,
+        filename_download: f?.filename_download || null,
+        type: f?.type || null,
+        filesize: f?.filesize || null,
+        uploaded_on: f?.uploaded_on || null,
+        download_url: fileId ? `/api/files/${encodeURIComponent(fileId)}?download=1` : null,
         directus_url: fileId ? `${base}/assets/${fileId}?download` : null,
       },
     };
@@ -191,12 +171,11 @@ function mapFiles(items: any[]) {
 }
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
+  const claimId = params.id;
   const c = cookies();
   let access = c.get(ACCESS_COOKIE)?.value;
   const refresh = c.get(REFRESH_COOKIE)?.value;
-  const claimId = params.id;
 
-  // Pre-refresh if access missing but refresh exists
   let preRefreshed: { access_token: string; refresh_token: string; expires?: number | string } | null = null;
   if (!access && refresh) {
     try {
@@ -205,20 +184,20 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
     } catch {}
   }
 
-  async function tryUserThenService(token?: string) {
+  async function run(token?: string) {
     if (token) {
       try {
-        return await listFiles(claimId, token);
+        return await listDocuments(claimId, token);
       } catch (e: any) {
         const s = e?.status as number | undefined;
         if (s === 401) throw e;
         if ((s === 400 || s === 403 || s === 404) && SERVICE_TOKEN) {
-          return await listFiles(claimId, SERVICE_TOKEN);
+          return await listDocuments(claimId, SERVICE_TOKEN);
         }
         throw e;
       }
     } else if (SERVICE_TOKEN) {
-      return await listFiles(claimId, SERVICE_TOKEN);
+      return await listDocuments(claimId, SERVICE_TOKEN);
     }
     const err = new Error("Unauthorized");
     // @ts-ignore
@@ -227,8 +206,8 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   }
 
   try {
-    const r = await tryUserThenService(access);
-    const res = NextResponse.json({ data: mapFiles(r.data || []) }, { status: 200 });
+    const r = await run(access);
+    const res = NextResponse.json({ data: mapDocs(r.data) }, { status: 200 });
     if (preRefreshed) setAuthCookies(res, preRefreshed.access_token, preRefreshed.refresh_token, preRefreshed.expires);
     return res;
   } catch (err: any) {
@@ -236,29 +215,24 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
     if (s === 401 && refresh) {
       try {
         const refreshed = await refreshAccessToken(refresh);
-        const r = await tryUserThenService(refreshed.access_token);
-        const res = NextResponse.json({ data: mapFiles(r.data || []) }, { status: 200 });
+        const r = await run(refreshed.access_token);
+        const res = NextResponse.json({ data: mapDocs(r.data) }, { status: 200 });
         setAuthCookies(res, refreshed.access_token, refreshed.refresh_token, refreshed.expires);
         return res;
       } catch (err2: any) {
-        const m = /Directus error\s+(\d+)/.exec(String(err2?.message || ""));
-        const code = (err2?.status as number) || (m ? parseInt(m[1], 10) : 401);
-        return NextResponse.json({ error: "Unauthorized" }, { status: code });
+        return NextResponse.json({ error: "Unauthorized" }, { status: err2?.status || 401 });
       }
     }
-    const m = /Directus error\s+(\d+)/.exec(String(err?.message || ""));
-    const code = (s as number) || (m ? parseInt(m[1], 10) : 500);
-    return NextResponse.json({ error: String(err?.message || "Error") }, { status: code });
+    return NextResponse.json({ error: String(err?.message || "Error") }, { status: s || 500 });
   }
 }
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const claimId = params.id;
   const c = cookies();
   let access = c.get(ACCESS_COOKIE)?.value;
   const refresh = c.get(REFRESH_COOKIE)?.value;
-  const claimId = params.id;
 
-  // Pre-refresh if access missing but refresh exists
   let preRefreshed: { access_token: string; refresh_token: string; expires?: number | string } | null = null;
   if (!access && refresh) {
     try {
@@ -266,72 +240,42 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       access = preRefreshed.access_token;
     } catch {}
   }
+  if (!access) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const form = await req.formData().catch(() => null);
-  if (!form) {
-    return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
-  }
-  const file = form.get("file") as unknown as File | null;
-  const visibility = (form.get("visibility") as string | null) || undefined;
-  if (!file || typeof file !== "object" || typeof (file as any).arrayBuffer !== "function") {
-    return NextResponse.json({ error: "file is required" }, { status: 400 });
-  }
+  if (!form) return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
+  const file = form.get("file");
+  const category = (form.get("category") as string) || undefined;
+  if (!(file instanceof File)) return NextResponse.json({ error: "file is required" }, { status: 400 });
 
-  async function tryUserThenServiceUpload(token?: string) {
-    if (token) {
-      try {
-  const upload = await uploadDirectusFile(file, token);
-  const fileId = upload?.data?.id;
-        if (!fileId) throw new Error("Upload succeeded but missing file id");
-        const j = await createJunction(claimId, String(fileId), visibility, token);
-        return { upload, junction: j };
-      } catch (e: any) {
-        const s = e?.status as number | undefined;
-        if (s === 401) throw e;
-        if ((s === 400 || s === 403 || s === 404) && SERVICE_TOKEN) {
-          const upload = await uploadDirectusFile(file, SERVICE_TOKEN);
-          const fileId = upload?.data?.id;
-          if (!fileId) throw new Error("Upload succeeded but missing file id");
-          const j = await createJunction(claimId, String(fileId), visibility, SERVICE_TOKEN);
-          return { upload, junction: j };
-        }
-        throw e;
-      }
-    } else if (SERVICE_TOKEN) {
-  const upload = await uploadDirectusFile(file, SERVICE_TOKEN);
-  const fileId = upload?.data?.id;
-      if (!fileId) throw new Error("Upload succeeded but missing file id");
-      const j = await createJunction(claimId, String(fileId), visibility, SERVICE_TOKEN);
-      return { upload, junction: j };
-    }
-    const err = new Error("Unauthorized");
-    // @ts-ignore
-    err.status = 401;
-    throw err;
-  }
-
+  let uploaded: any;
   try {
-    const r = await tryUserThenServiceUpload(access);
-    const res = NextResponse.json({ data: { file: r.upload?.data ?? r.upload, junction: r.junction?.data ?? r.junction } }, { status: 201 });
-    if (preRefreshed) setAuthCookies(res, preRefreshed.access_token, preRefreshed.refresh_token, preRefreshed.expires);
-    return res;
-  } catch (err: any) {
-    const s = err?.status as number | undefined;
-    if (s === 401 && refresh) {
+    uploaded = await uploadBinary(file, access);
+  } catch (e: any) {
+    const s = e?.status as number | undefined;
+    if (s === 401 && refresh && !preRefreshed) {
       try {
         const refreshed = await refreshAccessToken(refresh);
-        const r = await tryUserThenServiceUpload(refreshed.access_token);
-        const res = NextResponse.json({ data: { file: r.upload?.data ?? r.upload, junction: r.junction?.data ?? r.junction } }, { status: 201 });
-        setAuthCookies(res, refreshed.access_token, refreshed.refresh_token, refreshed.expires);
-        return res;
-      } catch (err2: any) {
-        const m = /Directus error\s+(\d+)/.exec(String(err2?.message || ""));
-        const code = (err2?.status as number) || (m ? parseInt(m[1], 10) : 401);
-        return NextResponse.json({ error: "Unauthorized" }, { status: code });
+        preRefreshed = refreshed;
+        access = refreshed.access_token;
+        uploaded = await uploadBinary(file, access);
+      } catch (e2: any) {
+        return NextResponse.json({ error: "Upload failed" }, { status: e2?.status || 500 });
       }
+    } else {
+      return NextResponse.json({ error: "Upload failed" }, { status: s || 500 });
     }
-    const m = /Directus error\s+(\d+)/.exec(String(err?.message || ""));
-    const code = (s as number) || (m ? parseInt(m[1], 10) : 500);
-    return NextResponse.json({ error: String(err?.message || "Error") }, { status: code });
+  }
+
+  const fileId = uploaded?.data?.id;
+  if (!fileId) return NextResponse.json({ error: "Missing file id" }, { status: 500 });
+
+  try {
+    const doc = await createDocumentRecord(claimId, fileId, category, access);
+    const res = NextResponse.json({ data: mapDocs([doc])[0] }, { status: 201 });
+    if (preRefreshed) setAuthCookies(res, preRefreshed.access_token, preRefreshed.refresh_token, preRefreshed.expires);
+    return res;
+  } catch (e: any) {
+    return NextResponse.json({ error: "Failed to link file" }, { status: e?.status || 500 });
   }
 }
