@@ -19,9 +19,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <Sidebar
         isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        onToggleAction={() => setSidebarOpen(!sidebarOpen)}
         isCollapsed={isCollapsed}
-        onToggleCollapse={() => setIsCollapsed(!isCollapsed)}
+        onToggleCollapseAction={() => setIsCollapsed(!isCollapsed)}
       />
 
       {/* Main Content */}
@@ -30,7 +30,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <header className="bg-white border-b border-gray-200 px-4 py-3 lg:px-6 lg:py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <SidebarToggle onToggle={() => setSidebarOpen(!sidebarOpen)} />
+              <SidebarToggle
+                onToggleAction={() => setSidebarOpen(!sidebarOpen)}
+              />
               <h1 className="text-xl lg:text-2xl font-semibold text-gray-900">
                 Claim Track Pro
               </h1>
