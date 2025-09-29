@@ -20,6 +20,7 @@ export default function StaffPage() {
   const [editTarget, setEditTarget] = useState<StaffItem | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState({
     first_name: "",
     last_name: "",
@@ -39,6 +40,7 @@ export default function StaffPage() {
   const [viewTarget, setViewTarget] = useState<StaffItem | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState<string | null>(null);
+  const [viewOpen, setViewOpen] = useState(false);
   // Roles dropdown data
   const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
@@ -99,9 +101,19 @@ export default function StaffPage() {
     : staff;
 
   function openEdit(id: string) {
-    // Fetch individual staff record for full details
+    const summary = staff.find((s) => s.id === id);
+    setEditTarget({
+      id,
+      name: summary?.name || id,
+      first_name: "",
+      last_name: "",
+      email: "",
+      role: "",
+    });
+    setForm({ first_name: "", last_name: "", email: "", role: "" });
     setEditError(null);
     setEditLoading(true);
+    setEditOpen(true);
     fetch(`/api/staff/${encodeURIComponent(id)}`, { cache: "no-store" })
       .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
       .then(({ ok, j }) => {
@@ -119,25 +131,35 @@ export default function StaffPage() {
         };
         setEditTarget(item);
         setForm({
-          first_name: item.first_name || "",
-          last_name: item.last_name || "",
-          email: item.email || "",
-          role: item.role || "",
+          first_name: item.first_name,
+          last_name: item.last_name,
+          email: item.email,
+          role: item.role,
         });
       })
-      .catch((e) => setEditError(e.message || "Failed to load"))
+      .catch((e) => setEditError(e.message || "Failed to load staff"))
       .finally(() => setEditLoading(false));
   }
 
   function openView(id: string) {
+    const summary = staff.find((s) => s.id === id);
+    setViewTarget({
+      id,
+      name: summary?.name || id,
+      first_name: "",
+      last_name: "",
+      email: "",
+      role: "",
+    });
     setViewError(null);
     setViewLoading(true);
+    setViewOpen(true);
     fetch(`/api/staff/${encodeURIComponent(id)}`, { cache: "no-store" })
       .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
       .then(({ ok, j }) => {
         if (!ok) throw new Error(j?.error || "Failed to load staff");
         const data = j?.data;
-        const item: StaffItem = {
+        setViewTarget({
           id: data.id,
           name:
             `${data.first_name || ""} ${data.last_name || ""}`.trim() ||
@@ -146,10 +168,9 @@ export default function StaffPage() {
           last_name: data.last_name || "",
           email: data.email || "",
           role: data.role || "",
-        };
-        setViewTarget(item);
+        });
       })
-      .catch((e) => setViewError(e.message || "Failed to load"))
+      .catch((e) => setViewError(e.message || "Failed to load staff"))
       .finally(() => setViewLoading(false));
   }
 
@@ -264,18 +285,28 @@ export default function StaffPage() {
         </div>
       </div>
       <Modal
-        open={!!editTarget}
+        open={editOpen}
         onClose={() => {
-          if (!editLoading) setEditTarget(null);
+          if (!editLoading) {
+            setEditOpen(false);
+            setEditTarget(null);
+            setEditError(null);
+          }
         }}
         title={editTarget ? `Edit Staff: ${editTarget.name}` : "Edit Staff"}
       >
+        {!editTarget && editLoading && (
+          <p className="text-sm text-gray-500">Loading staff...</p>
+        )}
         {editTarget && (
           <form onSubmit={saveEdit} className="space-y-4">
             {editError && (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
                 {editError}
               </div>
+            )}
+            {editLoading && !editError && (
+              <div className="text-xs text-gray-500">Loading details…</div>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -289,6 +320,7 @@ export default function StaffPage() {
                     setForm((f) => ({ ...f, first_name: e.target.value }))
                   }
                   className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={editLoading}
                 />
               </div>
               <div>
@@ -302,6 +334,7 @@ export default function StaffPage() {
                     setForm((f) => ({ ...f, last_name: e.target.value }))
                   }
                   className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={editLoading}
                 />
               </div>
               <div>
@@ -315,6 +348,7 @@ export default function StaffPage() {
                     setForm((f) => ({ ...f, email: e.target.value }))
                   }
                   className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={editLoading}
                 />
               </div>
               <div>
@@ -327,6 +361,7 @@ export default function StaffPage() {
                     setForm((f) => ({ ...f, role: e.target.value }))
                   }
                   className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={editLoading}
                 >
                   <option value="">
                     {rolesLoading ? "Loading roles..." : "Select a role"}
@@ -346,8 +381,12 @@ export default function StaffPage() {
               <button
                 type="button"
                 disabled={editLoading}
-                onClick={() => setEditTarget(null)}
-                className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50"
+                onClick={() => {
+                  setEditOpen(false);
+                  setEditTarget(null);
+                  setEditError(null);
+                }}
+                className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -363,13 +402,17 @@ export default function StaffPage() {
         )}
       </Modal>
       <Modal
-        open={!!viewTarget}
+        open={viewOpen}
         onClose={() => {
-          if (!viewLoading) setViewTarget(null);
+          if (!viewLoading) {
+            setViewOpen(false);
+            setViewTarget(null);
+            setViewError(null);
+          }
         }}
         title={viewTarget ? `Staff: ${viewTarget.name}` : "Staff"}
       >
-        {viewLoading && <p className="text-sm text-gray-500">Loading…</p>}
+        {viewLoading && <p className="text-sm text-gray-500">Loading staff…</p>}
         {viewError && <p className="text-sm text-red-600">{viewError}</p>}
         {viewTarget && !viewLoading && !viewError && (
           <div className="space-y-4">
@@ -426,8 +469,12 @@ export default function StaffPage() {
             <div className="flex justify-end">
               <button
                 type="button"
-                className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50"
-                onClick={() => setViewTarget(null)}
+                className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
+                onClick={() => {
+                  setViewOpen(false);
+                  setViewTarget(null);
+                  setViewError(null);
+                }}
                 disabled={viewLoading}
               >
                 Close

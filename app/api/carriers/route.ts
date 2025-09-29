@@ -37,15 +37,61 @@ async function dx(path: string, init?: RequestInit) {
   return res;
 }
 
-export async function GET() {
+// GET /api/carriers  -> list carriers (basic pagination support via limit/offset query params)
+export async function GET(req: Request) {
   try {
-  const res = await dx("/items/carriers?fields=id,name&sort=name");
+    const { searchParams } = new URL(req.url);
+    const limit = Number(searchParams.get("limit") || 50);
+    const offset = Number(searchParams.get("offset") || 0);
+    const fields = [
+      "id",
+      "name",
+      "naic",
+      "address.id",
+      "address.street_1",
+      "address.street_2",
+      "address.city",
+      "address.state",
+      "address.postal_code",
+      "phone",
+      "email",
+      "claims_email_intake",
+    ].join(",");
+
+    const res = await dx(`/items/carriers?fields=${encodeURIComponent(fields)}&sort=name&limit=${limit}&offset=${offset}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error("Directus carriers fetch failed:", res.status, data);
       return NextResponse.json({ error: "Failed to fetch carriers", detail: data }, { status: res.status || 500 });
     }
-    return NextResponse.json({ data: (data as any).data || [] });
+    return NextResponse.json({ data: (data as any).data || [], meta: (data as any).meta });
+  } catch (err: any) {
+    return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
+  }
+}
+
+// POST /api/carriers -> create carrier
+// Accepts optional "address" field which should be an existing address ID (uuid) referencing the Directus addresses collection.
+// To create a new address first, call POST /api/addresses then supply that id here.
+export async function POST(req: Request) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const payload: Record<string, any> = {};
+    for (const k of ["name", "naic", "address", "phone", "email", "claims_email_intake"]) {
+      if (body[k] !== undefined) payload[k] = body[k];
+    }
+    if (!payload.name) {
+      return NextResponse.json({ error: "'name' is required" }, { status: 400 });
+    }
+    const res = await dx(`/items/carriers`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return NextResponse.json({ error: "Failed to create carrier", detail: data }, { status: res.status || 500 });
+    }
+    return NextResponse.json({ data: (data as any).data }, { status: 201 });
   } catch (err: any) {
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
   }
