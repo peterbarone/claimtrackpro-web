@@ -13,54 +13,80 @@ const SERVICE_TOKEN = process.env.DIRECTUS_SERVICE_TOKEN || process.env.DIRECTUS
 const SERVICE_EMAIL = process.env.DIRECTUS_EMAIL;
 const SERVICE_PASSWORD = process.env.DIRECTUS_PASSWORD;
 
-// NOTE: 'role' may not be a direct field on the staff collection per schema (roles via junction).
-// Requesting it can produce a 403 field permission error. We'll treat that as partial data.
-// We attempt to request a denormalized single "role" field only if it exists; real roles are via staff_roles junction.
-// Removed direct 'role' field; roles come solely from staff_roles junction now.
+// We only read base staff fields; roles resolved separately through staff_roles -> roles.
 const FULL_FIELDS = 'id,first_name,last_name,email';
-// Keep email in minimal so UI can still show contact info even if role is restricted.
 const MIN_FIELDS  = 'id,first_name,last_name,email';
 
 // Junction collection & field names based on schema:
 // staff_roles (staff_id -> staff.id, role_id -> roles.id)
-// We'll map to an array of role objects { id, name, code? }
+// Expose roles as { id, name, key }
 const STAFF_ROLES_COLLECTION = 'staff_roles';
 const STAFF_ROLES_STAFF_FIELD = 'staff_id';
 const STAFF_ROLES_ROLE_FIELD = 'role_id';
+const ROLES_COLLECTION = 'roles';
+type RoleRecord = { id: string; name: string; key: string };
 
-async function fetchRolesForStaff(staffId: string, token: string, allowFallback: boolean): Promise<{ roles: any[]; partial: boolean }> {
-  // Fetch junction rows with embedded role
-  const path = `/items/${STAFF_ROLES_COLLECTION}?filter[${STAFF_ROLES_STAFF_FIELD}][_eq]=${encodeURIComponent(staffId)}&fields=id,${STAFF_ROLES_ROLE_FIELD}.id,${STAFF_ROLES_ROLE_FIELD}.name,${STAFF_ROLES_ROLE_FIELD}.code&limit=100`;
+async function fetchRolesForStaff(staffId: string, token: string, allowFallback: boolean): Promise<{ roles: RoleRecord[]; partial: boolean }> {
+  const path = `/items/${STAFF_ROLES_COLLECTION}?filter[${STAFF_ROLES_STAFF_FIELD}][_eq]=${encodeURIComponent(staffId)}&fields=id,${STAFF_ROLES_ROLE_FIELD}.id,${STAFF_ROLES_ROLE_FIELD}.name,${STAFF_ROLES_ROLE_FIELD}.key&limit=200`;
+  const mapRows = (rows: any[]): RoleRecord[] => rows
+    .map(r => r?.[STAFF_ROLES_ROLE_FIELD])
+    .filter(Boolean)
+    .map((r: any) => ({ id: String(r.id), name: String(r.name || ''), key: String(r.key || '') }));
   try {
     const resp = await directusFetch(path, { method: 'GET' }, token);
-    const rows: any[] = Array.isArray(resp?.data) ? resp.data : [];
-    const roles = rows
-      .map(r => r?.[STAFF_ROLES_ROLE_FIELD])
-      .filter(Boolean)
-      .map((r: any) => ({ id: r.id, name: r.name || r.code || '', code: r.code }));
-    return { roles, partial: false };
+    return { roles: mapRows(Array.isArray(resp?.data) ? resp.data : []), partial: false };
   } catch (e: any) {
-    const m = String(e?.message || '').match(/Directus error (\d{3})/);
-    const status = m ? Number(m[1]) : 0;
+    const status = Number((String(e?.message || '').match(/Directus error (\d{3})/)||[])[1]||0);
     if (status === 403 && allowFallback && ALLOW_SERVICE_FALLBACK) {
-      // Try service fallback
       let tokenSvc = SERVICE_TOKEN;
       if (!tokenSvc) tokenSvc = (await loginService()) || '';
       if (tokenSvc) {
         try {
           const resp2 = await directusFetch(path, { method: 'GET' }, tokenSvc);
-          const rows: any[] = Array.isArray(resp2?.data) ? resp2.data : [];
-          const roles = rows
-            .map(r => r?.[STAFF_ROLES_ROLE_FIELD])
-            .filter(Boolean)
-            .map((r: any) => ({ id: r.id, name: r.name || r.code || '', code: r.code }));
-          return { roles, partial: false };
+          return { roles: mapRows(Array.isArray(resp2?.data) ? resp2.data : []), partial: false };
         } catch {}
       }
     }
-    // Return partial (empty) if forbidden; still allow staff basic data
     return { roles: [], partial: true };
   }
+}
+
+async function resolveRequestedRoles(params: { ids?: string[]; keys?: string[]; names?: string[] }, token: string): Promise<{
+  rolesFound: RoleRecord[]; unknownIds: string[]; unknownKeys: string[]; unknownNames: string[];
+}> {
+  const ids = Array.from(new Set((params.ids||[]).filter(Boolean)));
+  const keys = Array.from(new Set((params.keys||[]).filter(Boolean)));
+  const namesRaw = (params.names||[]).filter(Boolean);
+  const names = Array.from(new Set(namesRaw.map(n => String(n))));
+  const found = new Map<string, RoleRecord>();
+  const push = (r:any)=>{ if(!r||!r.id)return; const rec:RoleRecord={id:String(r.id),name:String(r.name||''),key:String(r.key||'')}; if(!found.has(rec.id)) found.set(rec.id,rec); };
+  async function fetchRoles(filter: string) {
+    const resp = await directusFetch(`/items/${ROLES_COLLECTION}?${filter}&fields=id,name,key&limit=500`, { method: 'GET' }, token);
+    (Array.isArray(resp?.data)?resp.data:[]).forEach(push);
+  }
+  if (ids.length) await fetchRoles(`filter[id][_in]=${ids.map(encodeURIComponent).join(',')}`);
+  if (keys.length) await fetchRoles(`filter[key][_in]=${keys.map(encodeURIComponent).join(',')}`);
+  if (names.length) await fetchRoles(`filter[name][_in]=${names.map(encodeURIComponent).join(',')}`);
+  const unresolvedNames = names.filter(n => ![...found.values()].some(r => r.name === n));
+  if (unresolvedNames.length) {
+    try {
+      const all = await directusFetch(`/items/${ROLES_COLLECTION}?fields=id,name,key&limit=500`, { method: 'GET' }, token);
+      const allRows: any[] = Array.isArray(all?.data)?all.data:[];
+      const byLower = new Map<string, any>();
+      allRows.forEach(r=>byLower.set(String(r.name||'').toLowerCase(), r));
+      unresolvedNames.forEach(n=>{ const r=byLower.get(n.toLowerCase()); if(r) push(r); });
+    } catch { /* ignore */ }
+  }
+  const rolesFound = [...found.values()];
+  const idSet = new Set(rolesFound.map(r=>r.id));
+  const keySet = new Set(rolesFound.map(r=>r.key));
+  const nameLower = new Set(rolesFound.map(r=>r.name.toLowerCase()));
+  return {
+    rolesFound,
+    unknownIds: ids.filter(v=>!idSet.has(v)),
+    unknownKeys: keys.filter(v=>!keySet.has(v)),
+    unknownNames: names.filter(v=>!nameLower.has(v.toLowerCase()))
+  };
 }
 
 function devLog(...a: any[]) { if (process.env.NODE_ENV !== 'production') console.log('[staff/[id]]', ...a); }
@@ -182,14 +208,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       }
     } catch {}
 
-    // Derive legacy single 'role' value from first role (name or code) for backward compatibility.
-    const legacyRole = rolesInfo.roles.length ? (rolesInfo.roles[0].name || rolesInfo.roles[0].code || '') : '';
     const response = NextResponse.json({ data: {
       id: result.data.id,
       first_name: result.data.first_name || '',
       last_name: result.data.last_name || '',
       email: result.data._partial ? '' : (result.data.email || ''),
-      role: result.data._partial ? '' : legacyRole,
       roles: rolesInfo.roles,
       _partial: result.data._partial || (rolesInfo.partial ? true : undefined) || undefined,
     }});
@@ -221,30 +244,38 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 const MUTABLE = new Set(['first_name','last_name','email']); // direct 'role' removed; we only sync roles via junction
 
 async function syncRoles(staffId: string, desiredRoleIds: string[], token: string) {
-  // Fetch existing junction records
   const path = `/items/${STAFF_ROLES_COLLECTION}?filter[${STAFF_ROLES_STAFF_FIELD}][_eq]=${encodeURIComponent(staffId)}&fields=id,${STAFF_ROLES_ROLE_FIELD}`;
   const existingResp = await directusFetch(path, { method: 'GET' }, token);
   const existingRows: any[] = Array.isArray(existingResp?.data) ? existingResp.data : [];
-  const existingMap = new Map<string, string>(); // role_id -> junction id
+  const roleToJunction = new Map<string, string[]>();
   existingRows.forEach(r => {
-    const roleId = typeof r?.[STAFF_ROLES_ROLE_FIELD] === 'object' ? r[STAFF_ROLES_ROLE_FIELD]?.id : r[STAFF_ROLES_ROLE_FIELD];
-    if (roleId) existingMap.set(String(roleId), r.id);
+    const rid = typeof r?.[STAFF_ROLES_ROLE_FIELD] === 'object' ? r[STAFF_ROLES_ROLE_FIELD]?.id : r[STAFF_ROLES_ROLE_FIELD];
+    if (rid) {
+      const key = String(rid);
+      const list = roleToJunction.get(key) || [];
+      list.push(String(r.id));
+      roleToJunction.set(key, list);
+    }
   });
-  const desiredSet = new Set(desiredRoleIds.map(r => String(r)));
-  // Create needed
-  for (const roleId of desiredSet) {
-    if (!existingMap.has(roleId)) {
-      await directusFetch(
-        `/items/${STAFF_ROLES_COLLECTION}`,
-        { method: 'POST', body: JSON.stringify({ [STAFF_ROLES_STAFF_FIELD]: staffId, [STAFF_ROLES_ROLE_FIELD]: roleId, status: 'published' }), headers: { 'Content-Type':'application/json' } },
-        token
-      );
+  const desired = new Set(desiredRoleIds.map(String));
+  // Create missing
+  for (const rid of desired) {
+    if (!roleToJunction.has(rid)) {
+      await directusFetch(`/items/${STAFF_ROLES_COLLECTION}`,
+        { method: 'POST', body: JSON.stringify({ [STAFF_ROLES_STAFF_FIELD]: staffId, [STAFF_ROLES_ROLE_FIELD]: rid }), headers: { 'Content-Type':'application/json' } },
+        token);
     }
   }
-  // Delete removed
-  for (const [roleId, junctionId] of existingMap.entries()) {
-    if (!desiredSet.has(roleId)) {
-      await directusFetch(`/items/${STAFF_ROLES_COLLECTION}/${junctionId}`, { method: 'DELETE', headers: { 'Content-Type':'application/json' } }, token);
+  // Delete removed & dedupe
+  for (const [rid, ids] of roleToJunction.entries()) {
+    if (!desired.has(rid)) {
+      for (const j of ids) {
+        await directusFetch(`/items/${STAFF_ROLES_COLLECTION}/${j}`, { method: 'DELETE', headers: { 'Content-Type':'application/json' } }, token);
+      }
+    } else if (ids.length > 1) {
+      for (const dup of ids.slice(1)) {
+        await directusFetch(`/items/${STAFF_ROLES_COLLECTION}/${dup}`, { method: 'DELETE', headers: { 'Content-Type':'application/json' } }, token);
+      }
     }
   }
 }
@@ -258,22 +289,17 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   let body: any = {};
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
   const payload: Record<string, any> = {};
-  let rolesUpdate: string[] | undefined;
+  const roleIdsInput: string[] = Array.isArray(body.roles) ? body.roles.map((v:any)=>String(v)) : [];
+  const rolesByKeyInput: string[] = Array.isArray(body.rolesByKey) ? body.rolesByKey.map((v:any)=>String(v)) : [];
+  const rolesByNameInput: string[] = Array.isArray(body.rolesByName) ? body.rolesByName.map((v:any)=>String(v)) : [];
   for (const k of Object.keys(body || {})) {
-    if (k === 'roles' && Array.isArray(body[k])) {
-      // roles array of ids
-      rolesUpdate = body[k].map((r: any) => String(r));
-    } else if (MUTABLE.has(k) && body[k] !== undefined) {
+    if (MUTABLE.has(k) && body[k] !== undefined) {
       const v = body[k];
       payload[k] = typeof v === 'string' ? v.trim() : v;
     }
-    if (k === 'role' && body[k] && !body.roles) {
-      // Accept legacy single role field only to convert into rolesUpdate
-      const v = body[k];
-      rolesUpdate = [String(v).trim()].filter(Boolean);
-    }
   }
-  if (Object.keys(payload).length === 0 && !rolesUpdate) return NextResponse.json({ error: 'No changes' }, { status: 400 });
+  const rolesResolutionRequested = roleIdsInput.length || rolesByKeyInput.length || rolesByNameInput.length;
+  if (Object.keys(payload).length === 0 && !rolesResolutionRequested) return NextResponse.json({ error: 'No changes' }, { status: 400 });
 
   let refreshed = false;
   async function attemptStaffPatch(): Promise<any> {
@@ -316,29 +342,25 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
   try {
     const updated = await attemptStaffPatch();
-    // Sync roles if requested
-    if (rolesUpdate) {
+    if (rolesResolutionRequested) {
       try {
         if (!access && ALLOW_SERVICE_FALLBACK) {
-          let svc = SERVICE_TOKEN;
-            if (!svc) svc = (await loginService()) || '';
-            if (svc) access = svc;
+          let svc = SERVICE_TOKEN || (await loginService()) || '';
+          if (svc) access = svc;
         }
         if (!access) { const er: any = new Error('Forbidden'); er.status = 403; throw er; }
-        await syncRoles(params.id, rolesUpdate, access);
+        const resolution = await resolveRequestedRoles({ ids: roleIdsInput, keys: rolesByKeyInput, names: rolesByNameInput }, access);
+        if (resolution.unknownIds.length || resolution.unknownKeys.length || resolution.unknownNames.length) {
+          return NextResponse.json({ error: 'Unknown roles', unknown: { ids: resolution.unknownIds, keys: resolution.unknownKeys, names: resolution.unknownNames } }, { status: 400 });
+        }
+        const desiredRoleIds = resolution.rolesFound.map(r=>r.id);
+        await syncRoles(params.id, desiredRoleIds, access);
       } catch (roleErr: any) {
-        // If staff fields updated but roles failed, still return 207-like info; here we include warning
         return NextResponse.json({ data: updated?.data || updated, warning: 'Roles partially unsynced', roles_error: String(roleErr?.message || roleErr) }, { status: 207 });
       }
     }
-    // Fetch fresh roles to return unified response
-    let rolesReturn: any[] = [];
-    try {
-      if (access) {
-        const rolesInfo = await fetchRolesForStaff(params.id, access, true);
-        rolesReturn = rolesInfo.roles;
-      }
-    } catch {}
+    let rolesReturn: RoleRecord[] = [];
+    try { if (access) { const rinfo = await fetchRolesForStaff(params.id, access, true); rolesReturn = rinfo.roles; } } catch {}
     const res = NextResponse.json({ data: { ...(updated?.data || updated), roles: rolesReturn } });
     if (refreshed && access) {
       res.cookies.set(ACCESS_COOKIE, access, {

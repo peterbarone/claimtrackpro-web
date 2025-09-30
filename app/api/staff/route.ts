@@ -38,16 +38,49 @@ async function dx(path: string, init?: RequestInit) {
   return res;
 }
 
+// Helper to fetch roles for multiple staff in one round trip (N+1 avoidance)
+async function fetchRolesForStaffBatch(staffIds: string[]): Promise<Record<string, { id: string; name: string; key: string }[]>> {
+  if (staffIds.length === 0) return {};
+  const unique = Array.from(new Set(staffIds));
+  // Query junction embedding role
+  const filterIds = unique.map(id => encodeURIComponent(id)).join(',');
+  const path = `/items/${STAFF_ROLES_COLLECTION}?filter[${STAFF_ROLES_STAFF_FIELD}][_in]=${filterIds}&fields=id,${STAFF_ROLES_STAFF_FIELD},${STAFF_ROLES_ROLE_FIELD}.id,${STAFF_ROLES_ROLE_FIELD}.name,${STAFF_ROLES_ROLE_FIELD}.key&limit=${unique.length*25}`;
+  const res = await dx(path, { method: 'GET' });
+  let json: any = {};
+  try { json = await res.json(); } catch {}
+  if (!res.ok) return {};
+  const out: Record<string, { id: string; name: string; key: string }[]> = {};
+  const rows: any[] = Array.isArray(json?.data) ? json.data : [];
+  for (const row of rows) {
+    const sid = row?.[STAFF_ROLES_STAFF_FIELD];
+    const roleObj = row?.[STAFF_ROLES_ROLE_FIELD];
+    if (!sid || !roleObj || !roleObj.id) continue;
+    const rec = { id: String(roleObj.id), name: String(roleObj.name || ''), key: String(roleObj.key || '') };
+    if (!out[sid]) out[sid] = [];
+    // prevent dup role id for same staff
+    if (!out[sid].some(r => r.id === rec.id)) out[sid].push(rec);
+  }
+  return out;
+}
+
 export async function GET() {
   try {
-    const res = await dx(`/items/staff?fields=id,first_name,last_name&sort=last_name,first_name`);
+    const res = await dx(`/items/staff?fields=id,first_name,last_name,email&sort=last_name,first_name`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error("Directus staff fetch failed:", res.status, data);
       return NextResponse.json({ error: "Failed to fetch staff", detail: data }, { status: res.status || 500 });
     }
-    // Return all staff as a flat array
-    const staff = ((data as any).data || []).map((s: any) => ({ id: s.id, name: `${s.first_name} ${s.last_name}`.trim() }));
+    const list: any[] = (data as any).data || [];
+    const staffIds = list.map(s => s.id).filter(Boolean);
+    const rolesMap = await fetchRolesForStaffBatch(staffIds);
+    const staff = list.map(s => ({
+      id: s.id,
+      first_name: s.first_name || '',
+      last_name: s.last_name || '',
+      email: s.email || '',
+      roles: rolesMap[s.id] || []
+    }));
     return NextResponse.json({ data: staff });
   } catch (err: any) {
     console.error("/api/staff error:", err);
@@ -92,8 +125,8 @@ export async function POST(req: Request) {
     if (!res.ok) return NextResponse.json({ error: 'Create failed', detail: data }, { status: res.status || 500 });
     const item: any = data.data || data;
 
-    // Attempt to create junction rows for roles if requested
-    let roles: any[] = [];
+  // Attempt to create junction rows for roles if requested
+  let roles: any[] = [];
     let warning: string | undefined;
     if (desiredRoleIds && desiredRoleIds.length) {
       const uniqueRoleIds = Array.from(new Set(desiredRoleIds));
@@ -101,7 +134,7 @@ export async function POST(req: Request) {
         for (const roleId of uniqueRoleIds) {
           const jr = await dx(`/items/${STAFF_ROLES_COLLECTION}` , {
             method: 'POST',
-            body: JSON.stringify({ [STAFF_ROLES_STAFF_FIELD]: item.id, [STAFF_ROLES_ROLE_FIELD]: roleId, status: 'published' })
+            body: JSON.stringify({ [STAFF_ROLES_STAFF_FIELD]: item.id, [STAFF_ROLES_ROLE_FIELD]: roleId })
           });
           if (!jr.ok) {
             const errJson = await jr.json().catch(()=>({}));
@@ -110,17 +143,17 @@ export async function POST(req: Request) {
         }
         // Fetch role details to return enriched response
         const filterIds = uniqueRoleIds.map(encodeURIComponent).join(',');
-        const rolesRes = await dx(`/items/roles?filter[id][_in]=${filterIds}&fields=id,name,code&limit=${uniqueRoleIds.length}`);
+  const rolesRes = await dx(`/items/roles?filter[id][_in]=${filterIds}&fields=id,name,key&limit=${uniqueRoleIds.length}`);
         const rolesJson = await rolesRes.json().catch(() => ({}));
         if (rolesRes.ok && Array.isArray(rolesJson?.data)) {
-          roles = rolesJson.data.map((r: any) => ({ id: r.id, name: r.name || r.code || '', code: r.code }));
+          roles = rolesJson.data.map((r: any) => ({ id: r.id, name: r.name || '', key: r.key || '' }));
         }
       } catch (roleErr: any) {
         warning = `Staff created but roles not fully assigned: ${roleErr?.message || roleErr}`;
       }
     }
 
-    const responseBody: any = { data: { id: item.id, first_name: item.first_name || '', last_name: item.last_name || '', email: item.email || '', name: `${item.first_name || ''} ${item.last_name || ''}`.trim() || item.id, roles } };
+  const responseBody: any = { data: { id: item.id, first_name: item.first_name || '', last_name: item.last_name || '', email: item.email || '', roles } };
     if (warning) responseBody.warning = warning;
     return NextResponse.json(responseBody, { status: 201 });
   } catch (e:any) {

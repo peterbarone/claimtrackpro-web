@@ -1,18 +1,25 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 import AppShell from "@/components/AppShell";
 import { Modal } from "@/components/ui/modal";
 
+interface RoleItem {
+  id: string;
+  name?: string;
+  key?: string;
+}
 interface StaffItem {
   id: string;
   name: string;
   first_name?: string;
   last_name?: string;
   email?: string;
-  role?: string;
+  roles?: RoleItem[]; // normalized roles array
 }
 
 export default function StaffPage() {
+  const { toast } = useToast();
   const [staff, setStaff] = useState<StaffItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +32,7 @@ export default function StaffPage() {
     first_name: "",
     last_name: "",
     email: "",
-    role: "",
+    roles: [] as string[], // multi-select by role name
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
@@ -34,7 +41,7 @@ export default function StaffPage() {
     first_name: "",
     last_name: "",
     email: "",
-    role: "",
+    roles: [] as string[],
   });
   // View modal state
   const [viewTarget, setViewTarget] = useState<StaffItem | null>(null);
@@ -58,7 +65,14 @@ export default function StaffPage() {
         if (!ignore)
           setStaff(
             Array.isArray(j?.data)
-              ? j.data.map((s: any) => ({ id: s.id, name: s.name }))
+              ? j.data.map((s: any) => ({
+                  id: s.id,
+                  name:
+                    s.name ||
+                    `${s.first_name || ""} ${s.last_name || ""}`.trim() ||
+                    s.id,
+                  roles: Array.isArray(s.roles) ? s.roles : [],
+                }))
               : []
           );
       } catch (e) {
@@ -108,9 +122,9 @@ export default function StaffPage() {
       first_name: "",
       last_name: "",
       email: "",
-      role: "",
+      roles: [],
     });
-    setForm({ first_name: "", last_name: "", email: "", role: "" });
+    setForm({ first_name: "", last_name: "", email: "", roles: [] });
     setEditError(null);
     setEditLoading(true);
     setEditOpen(true);
@@ -119,6 +133,7 @@ export default function StaffPage() {
       .then(({ ok, j }) => {
         if (!ok) throw new Error(j?.error || "Failed to load staff");
         const data = j?.data;
+        const roles: RoleItem[] = Array.isArray(data.roles) ? data.roles : [];
         const item: StaffItem = {
           id: data.id,
           name:
@@ -127,17 +142,17 @@ export default function StaffPage() {
           first_name: data.first_name || "",
           last_name: data.last_name || "",
           email: data.email || "",
-          role: data.role || "",
+          roles,
         };
         setEditTarget(item);
         setForm({
           first_name: item.first_name,
           last_name: item.last_name,
           email: item.email,
-          role: item.role,
+          roles: roles.map((r) => r.name || r.key || "").filter(Boolean),
         });
       })
-      .catch((e) => setEditError(e.message || "Failed to load staff"))
+      .catch((e) => setEditError((e as any).message || "Failed to load staff"))
       .finally(() => setEditLoading(false));
   }
 
@@ -149,7 +164,7 @@ export default function StaffPage() {
       first_name: "",
       last_name: "",
       email: "",
-      role: "",
+      roles: [],
     });
     setViewError(null);
     setViewLoading(true);
@@ -159,6 +174,7 @@ export default function StaffPage() {
       .then(({ ok, j }) => {
         if (!ok) throw new Error(j?.error || "Failed to load staff");
         const data = j?.data;
+        const roles: RoleItem[] = Array.isArray(data.roles) ? data.roles : [];
         setViewTarget({
           id: data.id,
           name:
@@ -167,10 +183,10 @@ export default function StaffPage() {
           first_name: data.first_name || "",
           last_name: data.last_name || "",
           email: data.email || "",
-          role: data.role || "",
+          roles,
         });
       })
-      .catch((e) => setViewError(e.message || "Failed to load staff"))
+      .catch((e) => setViewError((e as any).message || "Failed to load staff"))
       .finally(() => setViewLoading(false));
   }
 
@@ -180,12 +196,19 @@ export default function StaffPage() {
     setEditLoading(true);
     setEditError(null);
     try {
+      const payload: any = {
+        first_name: form.first_name,
+        last_name: form.last_name,
+        email: form.email,
+      };
+      if (form.roles.length) payload.rolesByName = form.roles;
+      else payload.roles = [];
       const res = await fetch(
         `/api/staff/${encodeURIComponent(editTarget.id)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         }
       );
       const j = await res.json().catch(() => ({}));
@@ -193,18 +216,55 @@ export default function StaffPage() {
         throw new Error(
           j?.error || j?.detail || `Update failed (${res.status})`
         );
-      // Update list inline (optimistic refresh name)
-      setStaff((prev) =>
-        prev.map((s) =>
-          s.id === editTarget.id
-            ? {
-                ...s,
-                name: `${form.first_name} ${form.last_name}`.trim() || s.name,
-              }
-            : s
-        )
-      );
+      // After successful patch, fetch fresh staff record to update roles & name accurately
+      try {
+        const refRes = await fetch(
+          `/api/staff/${encodeURIComponent(editTarget.id)}`,
+          { cache: "no-store" }
+        );
+        const refJ = await refRes.json().catch(() => ({}));
+        if (refRes.ok && refJ?.data) {
+          const d = refJ.data;
+          setStaff((prev) =>
+            prev.map((s) =>
+              s.id === editTarget.id
+                ? {
+                    id: d.id,
+                    name:
+                      d.name ||
+                      `${d.first_name || ""} ${d.last_name || ""}`.trim() ||
+                      d.id,
+                    first_name: d.first_name,
+                    last_name: d.last_name,
+                    email: d.email,
+                    roles: Array.isArray(d.roles) ? d.roles : [],
+                  }
+                : s
+            )
+          );
+        } else {
+          // fallback optimistic update for name only
+          setStaff((prev) =>
+            prev.map((s) =>
+              s.id === editTarget.id
+                ? {
+                    ...s,
+                    name:
+                      `${form.first_name} ${form.last_name}`.trim() || s.name,
+                  }
+                : s
+            )
+          );
+        }
+      } catch {
+        // ignore refetch errors
+      }
+      toast({
+        title: "Staff updated",
+        description: "Changes saved successfully.",
+      });
       setEditTarget(null);
+      setEditOpen(false);
     } catch (err) {
       setEditError(err.message || "Failed to update");
     } finally {
@@ -223,7 +283,7 @@ export default function StaffPage() {
                 first_name: "",
                 last_name: "",
                 email: "",
-                role: "",
+                roles: [],
               });
               setCreateError(null);
               setCreateOpen(true);
@@ -263,6 +323,16 @@ export default function StaffPage() {
                       {s.name}
                     </p>
                     <p className="text-xs text-gray-500">ID: {s.id}</p>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {s.roles && s.roles.length ? (
+                        s.roles
+                          .map((r) => r.name || r.key || "")
+                          .filter(Boolean)
+                          .join(", ")
+                      ) : (
+                        <span className="text-gray-400">No roles</span>
+                      )}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -351,27 +421,43 @@ export default function StaffPage() {
                   disabled={editLoading}
                 />
               </div>
-              <div>
+              <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Role
+                  Roles
                 </label>
-                <select
-                  value={form.role}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, role: e.target.value }))
-                  }
-                  className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={editLoading}
-                >
-                  <option value="">
-                    {rolesLoading ? "Loading roles..." : "Select a role"}
-                  </option>
-                  {roles.map((r) => (
-                    <option key={r.id} value={r.name}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex flex-wrap gap-2">
+                  {rolesLoading && (
+                    <span className="text-xs text-gray-500">
+                      Loading roles…
+                    </span>
+                  )}
+                  {!rolesLoading &&
+                    roles.map((r) => {
+                      const label = r.name;
+                      const checked = form.roles.includes(label);
+                      return (
+                        <label
+                          key={r.id}
+                          className="flex items-center gap-1 text-xs border rounded px-2 py-1 cursor-pointer select-none bg-white hover:bg-gray-50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-3 w-3"
+                            checked={checked}
+                            onChange={() =>
+                              setForm((f) => ({
+                                ...f,
+                                roles: checked
+                                  ? f.roles.filter((x) => x !== label)
+                                  : [...f.roles, label],
+                              }))
+                            }
+                          />
+                          <span>{label}</span>
+                        </label>
+                      );
+                    })}
+                </div>
                 {rolesError && (
                   <p className="mt-1 text-[11px] text-red-600">{rolesError}</p>
                 )}
@@ -449,10 +535,15 @@ export default function StaffPage() {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">
-                  Role
+                  Roles
                 </p>
                 <p className="font-medium text-gray-900">
-                  {viewTarget.role || (
+                  {viewTarget.roles && viewTarget.roles.length > 0 ? (
+                    viewTarget.roles
+                      .map((r) => r.name || r.key || "")
+                      .filter(Boolean)
+                      .join(", ")
+                  ) : (
                     <span className="text-gray-400">(none)</span>
                   )}
                 </p>
@@ -499,7 +590,14 @@ export default function StaffPage() {
               const res = await fetch("/api/staff", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(createForm),
+                body: JSON.stringify({
+                  first_name: createForm.first_name,
+                  last_name: createForm.last_name,
+                  email: createForm.email,
+                  ...(createForm.roles.length
+                    ? { rolesByName: createForm.roles }
+                    : { roles: [] }),
+                }),
               });
               const j = await res.json().catch(() => ({}));
               if (!res.ok)
@@ -508,7 +606,18 @@ export default function StaffPage() {
                 );
               const item = j?.data;
               if (item) {
-                setStaff((prev) => [{ id: item.id, name: item.name }, ...prev]);
+                setStaff((prev) => [
+                  {
+                    id: item.id,
+                    name:
+                      item.name ||
+                      `${item.first_name || ""} ${item.last_name ||
+                        ""}`.trim() ||
+                      item.id,
+                    roles: Array.isArray(item.roles) ? item.roles : [],
+                  },
+                  ...prev,
+                ]);
               }
               setCreateOpen(false);
             } catch (err) {
@@ -564,26 +673,41 @@ export default function StaffPage() {
                 className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <div>
+            <div className="md:col-span-2">
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Role
+                Roles
               </label>
-              <select
-                value={createForm.role}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, role: e.target.value }))
-                }
-                className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">
-                  {rolesLoading ? "Loading roles..." : "Select a role"}
-                </option>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.name}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
+              <div className="flex flex-wrap gap-2">
+                {rolesLoading && (
+                  <span className="text-xs text-gray-500">Loading roles…</span>
+                )}
+                {!rolesLoading &&
+                  roles.map((r) => {
+                    const label = r.name;
+                    const checked = createForm.roles.includes(label);
+                    return (
+                      <label
+                        key={r.id}
+                        className="flex items-center gap-1 text-xs border rounded px-2 py-1 cursor-pointer select-none bg-white hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3 w-3"
+                          checked={checked}
+                          onChange={() =>
+                            setCreateForm((f) => ({
+                              ...f,
+                              roles: checked
+                                ? f.roles.filter((x) => x !== label)
+                                : [...f.roles, label],
+                            }))
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    );
+                  })}
+              </div>
               {rolesError && (
                 <p className="mt-1 text-[11px] text-red-600">{rolesError}</p>
               )}
