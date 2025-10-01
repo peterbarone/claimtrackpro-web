@@ -100,8 +100,14 @@ export async function POST(req: Request) {
   let body: any = {};
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
 
-  // Extract roles list from incoming body (supports either roles: [] or single role)
+  // Extract desired roles through multiple accepted shapes:
+  // 1) roles: [id,...] (explicit IDs)
+  // 2) role: single id
+  // 3) rolesByName: [name,...]
+  // 4) rolesByKey: [key,...]
   let desiredRoleIds: string[] | undefined;
+  const rolesByName: string[] = Array.isArray(body?.rolesByName) ? body.rolesByName.filter(Boolean).map((v:any)=>String(v)) : [];
+  const rolesByKey: string[] = Array.isArray(body?.rolesByKey) ? body.rolesByKey.filter(Boolean).map((v:any)=>String(v)) : [];
   if (Array.isArray(body?.roles)) {
     desiredRoleIds = body.roles.map((r: any) => String(r)).filter(Boolean);
   } else if (body?.role) {
@@ -128,8 +134,36 @@ export async function POST(req: Request) {
   // Attempt to create junction rows for roles if requested
   let roles: any[] = [];
     let warning: string | undefined;
-    if (desiredRoleIds && desiredRoleIds.length) {
-      const uniqueRoleIds = Array.from(new Set(desiredRoleIds));
+    // Resolve role names/keys if provided
+    let resolvedIds: string[] = desiredRoleIds ? [...desiredRoleIds] : [];
+    if ((rolesByName.length || rolesByKey.length) && (!desiredRoleIds || !desiredRoleIds.length)) {
+      try {
+        const filters: string[] = [];
+        if (rolesByName.length) {
+          const names = rolesByName.map(encodeURIComponent).join(',');
+          filters.push(`filter[name][_in]=${names}`);
+        }
+        if (rolesByKey.length) {
+          const keys = rolesByKey.map(encodeURIComponent).join(',');
+          filters.push(`filter[key][_in]=${keys}`);
+        }
+        const query = filters.join('&');
+        const fetchRes = await dx(`/items/roles?${query}&fields=id,name,key&limit=${(rolesByName.length+rolesByKey.length)||50}`);
+        const fetchJson = await fetchRes.json().catch(()=>({}));
+        if (fetchRes.ok && Array.isArray(fetchJson?.data)) {
+          const rows: any[] = fetchJson.data;
+          const byLowerName = new Map<string,string>();
+          const byLowerKey = new Map<string,string>();
+          rows.forEach(r=>{ if(r?.id){ if(r.name) byLowerName.set(String(r.name).toLowerCase(), String(r.id)); if(r.key) byLowerKey.set(String(r.key).toLowerCase(), String(r.id)); }});
+          for (const n of rolesByName) { const id = byLowerName.get(n.toLowerCase()); if (id) resolvedIds.push(id); }
+          for (const k of rolesByKey) { const id = byLowerKey.get(k.toLowerCase()); if (id) resolvedIds.push(id); }
+        }
+      } catch (e) {
+        warning = `Role name/key resolution failed: ${(e as any)?.message || e}`;
+      }
+    }
+    if (resolvedIds.length) {
+      const uniqueRoleIds = Array.from(new Set(resolvedIds));
       try {
         for (const roleId of uniqueRoleIds) {
           const jr = await dx(`/items/${STAFF_ROLES_COLLECTION}` , {
@@ -141,9 +175,8 @@ export async function POST(req: Request) {
             throw new Error(`role assignment failed (${jr.status}) ${JSON.stringify(errJson)}`);
           }
         }
-        // Fetch role details to return enriched response
         const filterIds = uniqueRoleIds.map(encodeURIComponent).join(',');
-  const rolesRes = await dx(`/items/roles?filter[id][_in]=${filterIds}&fields=id,name,key&limit=${uniqueRoleIds.length}`);
+        const rolesRes = await dx(`/items/roles?filter[id][_in]=${filterIds}&fields=id,name,key&limit=${uniqueRoleIds.length}`);
         const rolesJson = await rolesRes.json().catch(() => ({}));
         if (rolesRes.ok && Array.isArray(rolesJson?.data)) {
           roles = rolesJson.data.map((r: any) => ({ id: r.id, name: r.name || '', key: r.key || '' }));
