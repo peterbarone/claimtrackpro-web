@@ -1,107 +1,4 @@
-    group: null
-      hidden: true
-      interface: input
-      note: null
-      options: null
-      readonly: true
-      required: false
-      sort: 1
-      special:
-        - uuid
-      translations: null
-      validation: null
-      validation_message: null
-      width: full
-    schema:
-      name: id
-      table: staff_roles
-      data_type: uuid
-      default_value: null
-      max_length: null
-      numeric_precision: null
-      numeric_scale: null
-      is_nullable: false
-      is_unique: true
-      is_indexed: false
-      is_primary_key: true
-      is_generated: false
-      generation_expression: null
-      has_auto_increment: false
-      foreign_key_table: null
-      foreign_key_column: null
-  - collection: staff_roles
-    field: status
-    type: string
-    meta:
-      collection: staff_roles
-      conditions: null
-      display: labels
-      display_options:
-        choices:
-          - background: var(--theme--primary-background)
-            color: var(--theme--primary)
-            foreground: var(--theme--primary)
-            text: $t:published
-            value: published
-          - background: var(--theme--background-normal)
-            color: var(--theme--foreground)
-            foreground: var(--theme--foreground)
-            text: $t:draft
-            value: draft
-          - background: var(--theme--warning-background)
-            color: var(--theme--warning)
-            foreground: var(--theme--warning)
-            text: $t:archived
-            value: archived
-        showAsDot: true
-      field: status
-      group: null
-      hidden: false
-      interface: select-dropdown
-      note: null
-      options:
-        choices:
-          - color: var(--theme--primary)
-            text: $t:published
-            value: published
-          - color: var(--theme--foreground)
-            text: $t:draft
-            value: draft
-          - color: var(--theme--warning)
-            text: $t:archived
-            value: archived
-      readonly: false
-      required: false
-      sort: 2
-      special: null
-      translations: null
-      validation: null
-      validation_message: null
-      width: full
-    schema:
-      name: status
-      table: staff_roles
-      data_type: character varying
-      default_value: draft
-      max_length: 255
-      numeric_precision: null
-      numeric_scale: null
-      is_nullable: false
-      is_unique: false
-      is_indexed: false
-      is_primary_key: false
-      is_generated: false
-      generation_expression: null
-      has_auto_increment: false
-      foreign_key_table: null
-      foreign_key_column: null
-  - collection: staff_roles
-    field: sort
-    type: integer
-    meta:
-      collection: staff_roles
-      conditions: null
-      display: null
+     display: null
       display_options: null
       field: sort
       group: null
@@ -312,7 +209,7 @@
       interface: select-dropdown-m2o
       note: null
       options:
-        template: '{{id}}'
+        template: '{{id}}{{last_name}}{{first_name}}'
       readonly: false
       required: false
       sort: 8
@@ -345,8 +242,9 @@
     meta:
       collection: staff_roles
       conditions: null
-      display: null
-      display_options: null
+      display: related-values
+      display_options:
+        template: '{{name}}'
       field: role_id
       group: null
       hidden: false
@@ -365,6 +263,45 @@
       width: full
     schema:
       name: role_id
+      table: staff_roles
+      data_type: uuid
+      default_value: null
+      max_length: null
+      numeric_precision: null
+      numeric_scale: null
+      is_nullable: true
+      is_unique: false
+      is_indexed: false
+      is_primary_key: false
+      is_generated: false
+      generation_expression: null
+      has_auto_increment: false
+      foreign_key_table: roles
+      foreign_key_column: id
+  - collection: staff_roles
+    field: roles_id
+    type: uuid
+    meta:
+      collection: staff_roles
+      conditions: null
+      display: null
+      display_options: null
+      field: roles_id
+      group: null
+      hidden: true
+      interface: null
+      note: null
+      options: null
+      readonly: false
+      required: false
+      sort: 10
+      special: null
+      translations: null
+      validation: null
+      validation_message: null
+      width: full
+    schema:
+      name: roles_id
       table: staff_roles
       data_type: uuid
       default_value: null
@@ -507,6 +444,27 @@ relations:
       constraint_name: claim_tasks_claim_foreign
       on_update: NO ACTION
       on_delete: CASCADE
+  - collection: claim_tasks
+    field: assignee
+    related_collection: claims_contacts
+    meta:
+      junction_field: null
+      many_collection: claim_tasks
+      many_field: assignee
+      one_allowed_collections: null
+      one_collection: claims_contacts
+      one_collection_field: null
+      one_deselect_action: nullify
+      one_field: null
+      sort_field: null
+    schema:
+      table: claim_tasks
+      column: assignee
+      foreign_key_table: claims_contacts
+      foreign_key_column: id
+      constraint_name: claim_tasks_assignee_foreign
+      on_update: NO ACTION
+      on_delete: SET NULL
   - collection: claims
     field: primary_insured
     related_collection: insureds
@@ -780,6 +738,27 @@ relations:
       constraint_name: claims_contacts_contacts_id_foreign
       on_update: NO ACTION
       on_delete: CASCADE
+  - collection: contacts
+    field: role
+    related_collection: roles
+    meta:
+      junction_field: null
+      many_collection: contacts
+      many_field: role
+      one_allowed_collections: null
+      one_collection: roles
+      one_collection_field: null
+      one_deselect_action: nullify
+      one_field: null
+      sort_field: null
+    schema:
+      table: contacts
+      column: role
+      foreign_key_table: roles
+      foreign_key_column: id
+      constraint_name: contacts_role_foreign
+      on_update: NO ACTION
+      on_delete: SET NULL
   - collection: insureds
     field: mailing_address
     related_collection: addresses
@@ -987,14 +966,14 @@ relations:
     field: staff_id
     related_collection: staff
     meta:
-      junction_field: null
+      junction_field: roles_id
       many_collection: staff_roles
       many_field: staff_id
       one_allowed_collections: null
       one_collection: staff
       one_collection_field: null
       one_deselect_action: nullify
-      one_field: null
+      one_field: assigned_roles
       sort_field: null
     schema:
       table: staff_roles
@@ -1023,5 +1002,26 @@ relations:
       foreign_key_table: roles
       foreign_key_column: id
       constraint_name: staff_roles_role_id_foreign
+      on_update: NO ACTION
+      on_delete: SET NULL
+  - collection: staff_roles
+    field: roles_id
+    related_collection: roles
+    meta:
+      junction_field: staff_id
+      many_collection: staff_roles
+      many_field: roles_id
+      one_allowed_collections: null
+      one_collection: roles
+      one_collection_field: null
+      one_deselect_action: nullify
+      one_field: null
+      sort_field: null
+    schema:
+      table: staff_roles
+      column: roles_id
+      foreign_key_table: roles
+      foreign_key_column: id
+      constraint_name: staff_roles_roles_id_foreign
       on_update: NO ACTION
       on_delete: SET NULL

@@ -55,50 +55,32 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     // Fallbacks if direct filter didn't work
     if (!finalData) {
-      // 1) Try fetching with relation fields and filter client-side if available
+      // 1) Attempt fetching required relation fields then strictly filter client-side
       const relFields = candidates.join(",");
-      let res = await dx(
-        `/items/contacts?fields=id,first_name,last_name,email,company,${encodeURIComponent(
-          relFields
-        )}&sort=last_name,first_name`
-      );
+      let res = await dx(`/items/contacts?fields=id,first_name,last_name,email,company,${encodeURIComponent(relFields)}&sort=last_name,first_name`);
       let data = await res.json().catch(() => ({}));
       if (res.ok) {
         const rows: any[] = Array.isArray(data?.data) ? data.data : [];
         const filtered = rows.filter((c: any) => {
-          // Keep if any candidate matches the carrierId or the relation is empty
           for (const f of candidates) {
-            const v = c?.[f as keyof typeof c];
-            if (v == null || v === "") return true; // unassigned
-            // If relation returns an object, try its id
-            if (
-              (typeof v === "string" || typeof v === "number") &&
-              String(v) === String(carrierId)
-            )
+            const v = c?.[f];
+            if (v == null) continue; // ignore unassigned now (do NOT include unrelated contacts)
+            if (typeof v === 'string' || typeof v === 'number') {
+              if (String(v) === String(carrierId)) return true;
+            } else if (typeof v === 'object' && v && String(v.id) === String(carrierId)) {
               return true;
-            if (typeof v === "object" && v && String((v as any).id) === String(carrierId))
-              return true;
+            }
           }
+          // Secondary heuristic: match company name exactly to carrier name via query param ?carrier_name= (optional)
+          const url = new URL(req.url);
+          const carrierName = url.searchParams.get('carrier_name');
+          if (carrierName && typeof c.company === 'string' && c.company.trim().toLowerCase() === carrierName.trim().toLowerCase()) return true;
           return false;
         });
         finalData = filtered;
       } else {
-        console.warn(
-          "Contacts fallback with relation fields failed:",
-          res.status,
-          data
-        );
-        // 2) Last resort: fetch minimal fields to avoid permission issues and return unfiltered list
-        res = await dx(
-          `/items/contacts?fields=id,first_name,last_name,email,company&sort=last_name,first_name`
-        );
-        data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(
-            `Failed to fetch contacts$${lastErr ? `, last filtered error: ${JSON.stringify(lastErr)}` : ""}`
-          );
-        }
-        finalData = Array.isArray(data?.data) ? data.data : [];
+        console.warn('Contacts fallback with relation fields failed:', res.status, data);
+        throw new Error(`Failed to fetch contacts for carrier ${carrierId}${lastErr ? ` (prior filtered error: ${JSON.stringify(lastErr)})` : ''}`);
       }
     }
 
@@ -113,7 +95,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       email: c.email,
       company: c.company,
     }));
-    return NextResponse.json({ data: contacts });
+    // Ensure only unique by id (in case duplicates due to multiple candidate fields)
+    const seen = new Set();
+    const deduped = contacts.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+    return NextResponse.json({ data: deduped });
   } catch (err: any) {
     return NextResponse.json({ error: String(err?.message || err) }, { status: 500 });
   }

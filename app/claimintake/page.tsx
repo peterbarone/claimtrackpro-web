@@ -63,6 +63,12 @@ interface CoverageLine {
   amount: string;
 }
 
+interface ClaimParticipant {
+  id: string;              // local form row id
+  contactId: string;       // selected contact id
+  role: string;            // optional role / label (could reuse contact role or free text)
+}
+
 type PrimaryContactValue = `insured-${string}` | `contact-${string}`;
 
 interface ClaimFormData {
@@ -140,6 +146,35 @@ export default function ClaimIntake() {
   const [coverageLines, setCoverageLines] = useState<CoverageLine[]>([
     { id: "1", description: "", amount: "" },
   ]);
+  // All contacts (for participants selector) – kept separate from carrier clientContacts
+  const [allContacts, setAllContacts] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [allContactsLoading, setAllContactsLoading] = useState(false);
+  useEffect(() => {
+    setAllContactsLoading(true);
+    fetch('/api/contacts')
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data?.data)) {
+          setAllContacts(data.data.map((c:any) => ({ id: String(c.id), name: c.name || `${c.first_name||''} ${c.last_name||''}`.trim() || c.email || 'Unnamed', email: c.email || '' })));
+        } else {
+          setAllContacts([]);
+        }
+      })
+      .catch(() => setAllContacts([]))
+      .finally(() => setAllContactsLoading(false));
+  }, []);
+
+  // Claim Participants (repeatable selection of contacts besides manager/adjuster)
+  const [claimParticipants, setClaimParticipants] = useState<ClaimParticipant[]>([]);
+  const addClaimParticipant = () => {
+    setClaimParticipants(prev => [...prev, { id: (prev.length+1).toString(), contactId: '', role: '' }]);
+  };
+  const updateClaimParticipant = (rowId: string, patch: Partial<ClaimParticipant>) => {
+    setClaimParticipants(prev => prev.map(p => p.id === rowId ? { ...p, ...patch } : p));
+  };
+  const removeClaimParticipant = (rowId: string) => {
+    setClaimParticipants(prev => prev.filter(p => p.id !== rowId));
+  };
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -178,23 +213,22 @@ export default function ClaimIntake() {
       setClientContacts([]);
       return;
     }
-    setClientContactsLoading(true);
-    fetch(`/api/carriers/${formData.clientCompany}/contacts`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data.data)) {
-          setClientContacts(
-            data.data.map((c: any) => ({
-              id: String(c.id ?? c.email ?? c.name ?? ""),
-              label: c.name || c.full_name || c.email || "",
-            }))
-          );
-        } else {
-          setClientContacts([]);
-        }
-      })
-      .catch(() => setClientContacts([]))
-      .finally(() => setClientContactsLoading(false));
+    let cancelled = false;
+    async function loadContacts() {
+      setClientContactsLoading(true);
+      try {
+        const res = await fetch(`/api/carriers/${formData.clientCompany}/contacts`, { cache: 'no-store' });
+        const json: any = await res.json().catch(() => ({}));
+        const list: any[] = Array.isArray(json?.data) ? json.data : [];
+        if (!cancelled) setClientContacts(list.map((c: any) => ({ id: String(c.id ?? c.email ?? c.name ?? ''), label: c.name || c.full_name || c.email || '' })))
+      } catch (e) {
+        if (!cancelled) setClientContacts([]);
+      } finally {
+        if (!cancelled) setClientContactsLoading(false);
+      }
+    }
+    loadContacts();
+    return () => { cancelled = true; };
   }, [formData.clientCompany]);
 
   const states = [
@@ -406,6 +440,7 @@ export default function ClaimIntake() {
           insuredPersons,
           additionalContacts,
           coverageLines,
+          claimParticipants,
           submitType,
         }),
       });
@@ -846,7 +881,7 @@ export default function ClaimIntake() {
 
             {/* Additional Contacts */}
             <div className="space-y-4">
-              <h4 className="text-lg font-medium text-gray-900">Additional Contacts & Claim Participant</h4>
+              <h4 className="text-lg font-medium text-gray-900">Additional Contacts</h4>
 
               <Button type="button" variant="outline" size="sm" onClick={addAdditionalContact} className="h-9">
                 <PlusIcon className="h-4 w-4 mr-1" />
@@ -1034,53 +1069,6 @@ export default function ClaimIntake() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Assigned Manager</Label>
-                <Select
-                  value={formData.assignedManager}
-                  onValueChange={(v) => updateFormData("assignedManager", v)}
-                  disabled={staffLoading}
-                >
-                  <SelectTrigger className="h-11">
-                    <SelectValue
-                      placeholder={staffLoading ? "Loading..." : "Select manager"}
-                    >
-                      {getStaffName(formData.assignedManager, staff) || (staffLoading ? "Loading..." : "Select manager")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {staff.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Assigned Adjuster</Label>
-                <Select
-                  value={formData.assignedAdjuster}
-                  onValueChange={(v) => updateFormData("assignedAdjuster", v)}
-                  disabled={staffLoading}
-                >
-                  <SelectTrigger className="h-11">
-                    <SelectValue
-                      placeholder={staffLoading ? "Loading..." : "Select adjuster"}
-                    >
-                      {getStaffName(formData.assignedAdjuster, staff) || (staffLoading ? "Loading..." : "Select adjuster")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {staff.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
 
             <div className="space-y-2">
@@ -1091,6 +1079,113 @@ export default function ClaimIntake() {
                 className="min-h-[100px]"
                 placeholder="Describe the loss in detail..."
               />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Claim Participants (moved below Loss Information) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <UserIcon className="h-5 w-5 text-[#92C4D5]" />
+              <span>Claim Participants</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Assigned Manager</Label>
+                <Select
+                  value={formData.assignedManager}
+                  onValueChange={(v) => updateFormData("assignedManager", v)}
+                  disabled={staffLoading}
+                >
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder={staffLoading ? "Loading..." : "Select manager"}>
+                      {getStaffName(formData.assignedManager, staff) || (staffLoading ? "Loading..." : "Select manager")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {staff.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Assigned Adjuster</Label>
+                <Select
+                  value={formData.assignedAdjuster}
+                  onValueChange={(v) => updateFormData("assignedAdjuster", v)}
+                  disabled={staffLoading}
+                >
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder={staffLoading ? "Loading..." : "Select adjuster"}>
+                      {getStaffName(formData.assignedAdjuster, staff) || (staffLoading ? "Loading..." : "Select adjuster")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {staff.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Repeatable Other Participants */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-lg font-medium text-gray-900">Other Claim Participants</h4>
+                <Button type="button" variant="outline" size="sm" onClick={addClaimParticipant} className="h-9">
+                  <PlusIcon className="h-4 w-4 mr-1" /> Add Participant
+                </Button>
+              </div>
+
+              {claimParticipants.length === 0 && (
+                <p className="text-sm text-gray-500">No additional participants added.</p>
+              )}
+
+              <div className="space-y-4">
+                {claimParticipants.map((p) => (
+                  <div key={p.id} className="border rounded-lg p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h5 className="font-medium text-gray-900">Participant</h5>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => removeClaimParticipant(p.id)} className="text-red-600 hover:text-red-700 h-8 w-8 p-0">
+                        <XIcon className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2 md:col-span-2">
+                        <Label className="text-sm font-medium">Contact</Label>
+                        <Select
+                          value={p.contactId}
+                          onValueChange={(v) => updateClaimParticipant(p.id, { contactId: v })}
+                          disabled={allContactsLoading}
+                        >
+                          <SelectTrigger className="h-11">
+                            <SelectValue placeholder={allContactsLoading ? 'Loading...' : 'Select contact'} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allContacts.map(c => (
+                              <SelectItem key={c.id} value={c.id}>{c.name}{c.email ? ` (${c.email})` : ''}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Role / Label (optional)</Label>
+                        <Input
+                          value={p.role}
+                          onChange={(e) => updateClaimParticipant(p.id, { role: e.target.value })}
+                          className="h-11"
+                          placeholder="e.g. Engineer, Contractor"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </CardContent>
         </Card>
