@@ -32,6 +32,7 @@ export default function StaffPage() {
     first_name: "",
     last_name: "",
     email: "",
+    phone: "",
     roles: [] as string[], // multi-select by role name
   });
   const [createOpen, setCreateOpen] = useState(false);
@@ -41,6 +42,7 @@ export default function StaffPage() {
     first_name: "",
     last_name: "",
     email: "",
+    phone: "",
     roles: [] as string[],
   });
   // View modal state
@@ -124,7 +126,7 @@ export default function StaffPage() {
       email: "",
       roles: [],
     });
-    setForm({ first_name: "", last_name: "", email: "", roles: [] });
+    setForm({ first_name: "", last_name: "", email: "", phone: "", roles: [] });
     setEditError(null);
     setEditLoading(true);
     setEditOpen(true);
@@ -149,6 +151,7 @@ export default function StaffPage() {
           first_name: item.first_name,
           last_name: item.last_name,
           email: item.email,
+          phone: data.phone || "",
           roles: roles.map((r) => r.name || r.key || "").filter(Boolean),
         });
       })
@@ -200,6 +203,7 @@ export default function StaffPage() {
         first_name: form.first_name,
         last_name: form.last_name,
         email: form.email,
+        phone: form.phone || undefined,
       };
       if (form.roles.length) payload.rolesByName = form.roles;
       else payload.roles = [];
@@ -283,6 +287,7 @@ export default function StaffPage() {
                 first_name: "",
                 last_name: "",
                 email: "",
+                phone: "",
                 roles: [],
               });
               setCreateError(null);
@@ -417,6 +422,21 @@ export default function StaffPage() {
                   onChange={(e) =>
                     setForm((f) => ({ ...f, email: e.target.value }))
                   }
+                  className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={editLoading}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Phone
+                </label>
+                <input
+                  type="tel"
+                  value={form.phone}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, phone: e.target.value }))
+                  }
+                  placeholder="(555) 123-4567"
                   className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={editLoading}
                 />
@@ -594,6 +614,7 @@ export default function StaffPage() {
                   first_name: createForm.first_name,
                   last_name: createForm.last_name,
                   email: createForm.email,
+                  phone: createForm.phone || undefined,
                   ...(createForm.roles.length
                     ? { rolesByName: createForm.roles }
                     : { roles: [] }),
@@ -673,6 +694,20 @@ export default function StaffPage() {
                 className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Phone
+              </label>
+              <input
+                type="tel"
+                value={createForm.phone}
+                onChange={(e) =>
+                  setCreateForm((f) => ({ ...f, phone: e.target.value }))
+                }
+                placeholder="(555) 123-4567"
+                className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
             <div className="md:col-span-2">
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 Roles
@@ -681,35 +716,61 @@ export default function StaffPage() {
                 {rolesLoading && (
                   <span className="text-xs text-gray-500">Loading roles…</span>
                 )}
+                {!rolesLoading && roles.length === 0 && (
+                  <span className="text-xs text-gray-400">
+                    No roles available
+                  </span>
+                )}
                 {!rolesLoading &&
                   roles.map((r) => {
                     const label = r.name;
                     const checked = createForm.roles.includes(label);
                     return (
-                      <label
+                      <button
                         key={r.id}
-                        className="flex items-center gap-1 text-xs border rounded px-2 py-1 cursor-pointer select-none bg-white hover:bg-gray-50"
+                        type="button"
+                        aria-pressed={checked}
+                        onClick={() =>
+                          setCreateForm((f) => ({
+                            ...f,
+                            roles: checked
+                              ? f.roles.filter((x) => x !== label)
+                              : [...f.roles, label],
+                          }))
+                        }
+                        className={[
+                          "relative inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1",
+                          checked
+                            ? "bg-blue-600 text-white border-blue-600 shadow-sm hover:bg-blue-600/90"
+                            : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50",
+                        ].join(" ")}
                       >
-                        <input
-                          type="checkbox"
-                          className="h-3 w-3"
-                          checked={checked}
-                          onChange={() =>
-                            setCreateForm((f) => ({
-                              ...f,
-                              roles: checked
-                                ? f.roles.filter((x) => x !== label)
-                                : [...f.roles, label],
-                            }))
-                          }
-                        />
                         <span>{label}</span>
-                      </label>
+                        {checked && (
+                          <svg
+                            className="h-3 w-3"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M16.707 5.293a1 1 0 010 1.414l-7.25 7.25a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414l2.293 2.293 6.543-6.543a1 1 0 011.414 0z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        )}
+                      </button>
                     );
                   })}
               </div>
               {rolesError && (
                 <p className="mt-1 text-[11px] text-red-600">{rolesError}</p>
+              )}
+              {!rolesLoading && roles.length > 0 && (
+                <p className="mt-2 text-[11px] text-gray-400">
+                  Selected: {createForm.roles.length || 0}
+                </p>
               )}
             </div>
           </div>

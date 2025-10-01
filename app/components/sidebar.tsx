@@ -24,6 +24,7 @@ const navigationItems = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboardIcon },
   { name: "Claims", href: "/claims", icon: FileTextIcon },
   { name: "Carriers", href: "/carriers", icon: FileTextIcon },
+  { name: "Address Book", href: "/address-book", icon: UsersIcon },
   { name: "Tasks", href: "/tasks", icon: CheckSquareIcon },
   { name: "Staff", href: "/staff", icon: UsersIcon },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
