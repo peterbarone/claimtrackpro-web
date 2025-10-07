@@ -65,7 +65,7 @@ async function fetchRolesForStaffBatch(staffIds: string[]): Promise<Record<strin
 
 export async function GET() {
   try {
-    const res = await dx(`/items/staff?fields=id,first_name,last_name,email&sort=last_name,first_name`);
+  const res = await dx(`/items/staff?fields=id,first_name,last_name,email,phone,phone_ext&sort=last_name,first_name`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error("Directus staff fetch failed:", res.status, data);
@@ -79,6 +79,8 @@ export async function GET() {
       first_name: s.first_name || '',
       last_name: s.last_name || '',
       email: s.email || '',
+      phone: s.phone || '',
+      phone_ext: s.phone_ext || '',
       roles: rolesMap[s.id] || []
     }));
     return NextResponse.json({ data: staff });
@@ -89,7 +91,7 @@ export async function GET() {
 }
 
 // We no longer create/write a direct 'role' field to staff; roles live exclusively in staff_roles junction.
-const CREATABLE_FIELDS = new Set(['first_name','last_name','email']);
+const CREATABLE_FIELDS = new Set(['first_name','last_name','email','phone','phone_ext']);
 
 // Junction table constants (mirrors logic in [id]/route.ts)
 const STAFF_ROLES_COLLECTION = 'staff_roles';
@@ -186,7 +188,7 @@ export async function POST(req: Request) {
       }
     }
 
-  const responseBody: any = { data: { id: item.id, first_name: item.first_name || '', last_name: item.last_name || '', email: item.email || '', roles } };
+  const responseBody: any = { data: { id: item.id, first_name: item.first_name || '', last_name: item.last_name || '', email: item.email || '', phone: item.phone || '', phone_ext: item.phone_ext || '', roles } };
     if (warning) responseBody.warning = warning;
     return NextResponse.json(responseBody, { status: 201 });
   } catch (e:any) {

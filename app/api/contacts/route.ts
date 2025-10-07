@@ -52,7 +52,7 @@ export async function GET(req: Request) {
   else if (role) filters.push(`filter[role][_eq]=${encodeURIComponent(role)}`);
   const qs = [
     ...filters,
-    'fields=' + encodeURIComponent(['id','first_name','last_name','role','company','phone','email','notes'].join(',')),
+  'fields=' + encodeURIComponent(['id','first_name','last_name','role','company','phone','phone_ext','email','notes'].join(',')),
     'sort=' + encodeURIComponent('last_name,first_name')
   ].join('&');
   try {
@@ -68,6 +68,7 @@ export async function GET(req: Request) {
       role: c.role || '',
       company: c.company || '',
       phone: c.phone || '',
+      phone_ext: c.phone_ext || '',
       email: c.email || '',
       notes: c.notes || '',
       name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Unnamed'
@@ -82,7 +83,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   let body: any = {};
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
-  const allowed = ['first_name','last_name','role','company','phone','email','notes'];
+  const allowed = ['first_name','last_name','role','company','phone','phone_ext','email','notes'];
   const payload: Record<string, any> = {};
   for (const k of allowed) if (body[k] !== undefined && body[k] !== null && String(body[k]).trim() !== '') payload[k] = typeof body[k] === 'string' ? body[k].trim() : body[k];
   if (!payload.company) return NextResponse.json({ error: 'company is required' }, { status: 400 });
@@ -99,8 +100,8 @@ export async function POST(req: Request) {
     if (!res.ok) {
       return NextResponse.json({ error: 'Failed to create contact', detail: data, payload }, { status: res.status || 500 });
     }
-    const c: any = (data as any).data || {};
-    return NextResponse.json({ data: { id: c.id, ...payload } }, { status: 201 });
+  const c: any = (data as any).data || {};
+  return NextResponse.json({ data: { id: c.id, ...payload } }, { status: 201 });
   } catch (err: any) {
     return NextResponse.json({ error: String(err?.message || err), payload }, { status: 500 });
   }

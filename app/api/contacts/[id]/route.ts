@@ -45,6 +45,7 @@ const FIELDS = [
   'role',
   'company',
   'phone',
+  'phone_ext',
   'email',
   'notes'
 ].join(',');
@@ -67,7 +68,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const id = params.id;
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
     const body = await req.json().catch(() => ({}));
-    const allowed = ['first_name','last_name','role','company','phone','email','notes'];
+  const allowed = ['first_name','last_name','role','company','phone','phone_ext','email','notes'];
     const payload: Record<string, any> = {};
     for (const k of allowed) if (body[k] !== undefined) payload[k] = body[k];
     if (Object.keys(payload).length === 0) return NextResponse.json({ error: 'No updatable fields provided' }, { status: 400 });

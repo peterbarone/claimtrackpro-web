@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import PhoneField from "@/components/phone-field";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 
@@ -45,6 +46,8 @@ interface InsuredPerson {
   email: string;
   phone: string;
   phone2: string;
+  phone_ext?: string;
+  phone2_ext?: string;
 }
 
 interface AdditionalContact {
@@ -53,6 +56,7 @@ interface AdditionalContact {
   lastName: string;
   email: string;
   phone: string;
+  phone_ext?: string;
   contactType: string;
   customType?: string;
 }
@@ -139,7 +143,7 @@ export default function ClaimIntake() {
 
   // ✅ Add business fields into InsuredPerson shape
   const [insuredPersons, setInsuredPersons] = useState<InsuredPerson[]>([
-    { id: "1", isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "" },
+    { id: "1", isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "", phone_ext: "", phone2_ext: "" },
   ]);
 
   const [additionalContacts, setAdditionalContacts] = useState<AdditionalContact[]>([]);
@@ -338,7 +342,7 @@ export default function ClaimIntake() {
     const newId = (insuredPersons.length + 1).toString();
     setInsuredPersons((prev) => [
       ...prev,
-      { id: newId, isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "" },
+      { id: newId, isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "", phone_ext: "", phone2_ext: "" },
     ]);
   };
 
@@ -364,7 +368,7 @@ export default function ClaimIntake() {
     const newId = (additionalContacts.length + 1).toString();
     setAdditionalContacts((prev) => [
       ...prev,
-      { id: newId, firstName: "", lastName: "", email: "", phone: "", contactType: "" },
+      { id: newId, firstName: "", lastName: "", email: "", phone: "", phone_ext: "", contactType: "" },
     ]);
   };
 
@@ -455,7 +459,7 @@ export default function ClaimIntake() {
 
       if (submitType === "submitAndAdd") {
         setFormData({ ...initialForm, dateReceived: getCurrentDate() });
-        setInsuredPersons([{ id: "1", isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "" }]);
+  setInsuredPersons([{ id: "1", isBusiness: false, orgName: "", firstName: "", lastName: "", email: "", phone: "", phone2: "", phone_ext: "", phone2_ext: "" }]);
         setAdditionalContacts([]);
         setCoverageLines([{ id: "1", description: "", amount: "" }]);
         setErrors({});
@@ -683,29 +687,22 @@ export default function ClaimIntake() {
                       )}
                     </div>
 
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">Phone</Label>
-                      <Input
-                        type="tel"
+                    <div className="space-y-2 md:col-span-2 lg:col-span-1">
+                      <PhoneField
+                        label="Phone"
                         value={person.phone}
-                        onChange={(e) =>
-                          updateInsuredPerson(person.id, "phone", e.target.value)
-                        }
-                        className="h-11"
-                        placeholder="(555) 123-4567"
+                        extValue={person.phone_ext || ''}
+                        onChangePhoneAction={(v) => updateInsuredPerson(person.id, 'phone', v)}
+                        onChangeExtAction={(v) => updateInsuredPerson(person.id, 'phone_ext', v)}
                       />
                     </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">Phone 2</Label>
-                      <Input
-                        type="tel"
+                    <div className="space-y-2 md:col-span-2 lg:col-span-1">
+                      <PhoneField
+                        label="Alt Phone"
                         value={person.phone2}
-                        onChange={(e) =>
-                          updateInsuredPerson(person.id, "phone2", e.target.value)
-                        }
-                        className="h-11"
-                        placeholder="(555) 123-4567"
+                        extValue={person.phone2_ext || ''}
+                        onChangePhoneAction={(v) => updateInsuredPerson(person.id, 'phone2', v)}
+                        onChangeExtAction={(v) => updateInsuredPerson(person.id, 'phone2_ext', v)}
                       />
                     </div>
                   </div>
@@ -940,13 +937,12 @@ export default function ClaimIntake() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Phone</Label>
-                      <Input
-                        type="tel"
+                      <PhoneField
+                        label="Phone"
                         value={contact.phone}
-                        onChange={(e) => updateAdditionalContact(contact.id, "phone", e.target.value)}
-                        className="h-11"
-                        placeholder="(555) 123-4567"
+                        extValue={contact.phone_ext || ''}
+                        onChangePhoneAction={(v) => updateAdditionalContact(contact.id, 'phone', v)}
+                        onChangeExtAction={(v) => updateAdditionalContact(contact.id, 'phone_ext', v)}
                       />
                     </div>
 

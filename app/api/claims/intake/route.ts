@@ -136,7 +136,15 @@ type InsuredInput = {
   email?: string;
   phone?: string;
   phone2?: string;
+  phone_ext?: string;      // extension for primary phone
+  phone2_ext?: string;     // extension for secondary/alt phone
 };
+
+function cleanExt(raw?: string) {
+  if (!raw) return null;
+  const digits = String(raw).replace(/\D+/g, "").slice(0, 8);
+  return digits || null;
+}
 
 async function createInsured(p: InsuredInput, mailingAddressId: string | null) {
   const payload = {
@@ -145,6 +153,9 @@ async function createInsured(p: InsuredInput, mailingAddressId: string | null) {
     email: p.email || null,
     phone: p.phone || null,
     phone_2: p.phone2 || null,
+    // New extension fields added to insureds collection
+    primary_phone_phone_ext: cleanExt(p.phone_ext) ,
+    alt_phone_phone_ext: cleanExt(p.phone2_ext),
     mailing_address: mailingAddressId,
   };
 
@@ -162,6 +173,7 @@ type ContactInput = {
   phone?: string;
   contactType?: string;
   customType?: string;
+  phone_ext?: string;
 };
 
 /**
@@ -175,6 +187,7 @@ async function createContact(c: ContactInput) {
     email: c.email || null,
     phone: c.phone || null,
     phone_2: null,
+    phone_ext: cleanExt(c.phone_ext),
   };
 
   const { data } = await directusRequest<{ data: { id: string } }>(
@@ -332,7 +345,8 @@ export async function POST(req: Request) {
           (c.firstName && c.firstName.trim()) ||
           (c.lastName && c.lastName.trim()) ||
           (c.email && c.email.trim()) ||
-          (c.phone && c.phone.trim());
+          (c.phone && c.phone.trim()) ||
+          (c.phone_ext && c.phone_ext.trim());
         if (!hasAny) continue;
 
         const newContactId = await createContact(c);

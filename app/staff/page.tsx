@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
+import { formatPhone, formatPhoneWithExt } from "@/lib/utils";
+import PhoneField from "@/components/phone-field";
 import { useToast } from "@/hooks/use-toast";
 import AppShell from "@/components/AppShell";
 import { Modal } from "@/components/ui/modal";
@@ -33,6 +35,7 @@ export default function StaffPage() {
     last_name: "",
     email: "",
     phone: "",
+    phone_ext: "",
     roles: [] as string[], // multi-select by role name
   });
   const [createOpen, setCreateOpen] = useState(false);
@@ -43,6 +46,7 @@ export default function StaffPage() {
     last_name: "",
     email: "",
     phone: "",
+    phone_ext: "",
     roles: [] as string[],
   });
   // View modal state
@@ -126,7 +130,14 @@ export default function StaffPage() {
       email: "",
       roles: [],
     });
-    setForm({ first_name: "", last_name: "", email: "", phone: "", roles: [] });
+    setForm({
+      first_name: "",
+      last_name: "",
+      email: "",
+      phone: "",
+      phone_ext: "",
+      roles: [],
+    });
     setEditError(null);
     setEditLoading(true);
     setEditOpen(true);
@@ -152,6 +163,7 @@ export default function StaffPage() {
           last_name: item.last_name,
           email: item.email,
           phone: data.phone || "",
+          phone_ext: data.phone_ext || "",
           roles: roles.map((r) => r.name || r.key || "").filter(Boolean),
         });
       })
@@ -204,6 +216,7 @@ export default function StaffPage() {
         last_name: form.last_name,
         email: form.email,
         phone: form.phone || undefined,
+        phone_ext: form.phone_ext || undefined,
       };
       if (form.roles.length) payload.rolesByName = form.roles;
       else payload.roles = [];
@@ -288,6 +301,7 @@ export default function StaffPage() {
                 last_name: "",
                 email: "",
                 phone: "",
+                phone_ext: "",
                 roles: [],
               });
               setCreateError(null);
@@ -359,6 +373,8 @@ export default function StaffPage() {
           )}
         </div>
       </div>
+
+      {/* Edit Modal */}
       <Modal
         open={editOpen}
         onClose={() => {
@@ -370,9 +386,6 @@ export default function StaffPage() {
         }}
         title={editTarget ? `Edit Staff: ${editTarget.name}` : "Edit Staff"}
       >
-        {!editTarget && editLoading && (
-          <p className="text-sm text-gray-500">Loading staff...</p>
-        )}
         {editTarget && (
           <form onSubmit={saveEdit} className="space-y-4">
             {editError && (
@@ -426,18 +439,17 @@ export default function StaffPage() {
                   disabled={editLoading}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Phone
-                </label>
-                <input
-                  type="tel"
+              <div className="md:col-span-2">
+                <PhoneField
+                  label="Phone"
                   value={form.phone}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, phone: e.target.value }))
+                  extValue={form.phone_ext}
+                  onChangePhoneAction={(v) =>
+                    setForm((f) => ({ ...f, phone: v }))
                   }
-                  placeholder="(555) 123-4567"
-                  className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChangeExtAction={(v) =>
+                    setForm((f) => ({ ...f, phone_ext: v }))
+                  }
                   disabled={editLoading}
                 />
               </div>
@@ -568,6 +580,16 @@ export default function StaffPage() {
                   )}
                 </p>
               </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">
+                  Phone
+                </p>
+                <p className="font-medium text-gray-900">
+                  {formatPhone((viewTarget as any).phone || "") || (
+                    <span className="text-gray-400">(none)</span>
+                  )}
+                </p>
+              </div>
               <div className="md:col-span-2">
                 <p className="text-xs uppercase tracking-wide text-gray-500">
                   ID
@@ -615,6 +637,7 @@ export default function StaffPage() {
                   last_name: createForm.last_name,
                   email: createForm.email,
                   phone: createForm.phone || undefined,
+                  phone_ext: createForm.phone_ext || undefined,
                   ...(createForm.roles.length
                     ? { rolesByName: createForm.roles }
                     : { roles: [] }),
@@ -703,6 +726,12 @@ export default function StaffPage() {
                 value={createForm.phone}
                 onChange={(e) =>
                   setCreateForm((f) => ({ ...f, phone: e.target.value }))
+                }
+                onBlur={(e) =>
+                  setCreateForm((f) => ({
+                    ...f,
+                    phone: formatPhone(e.target.value),
+                  }))
                 }
                 placeholder="(555) 123-4567"
                 className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"

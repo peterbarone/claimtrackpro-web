@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  formatPhoneWithExt,
+  formatPhone,
+  normalizeExtension,
+} from "@/lib/utils";
+import PhoneField from "@/components/phone-field";
 import AppShell from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +43,7 @@ interface ContactItem {
   role: string;
   company: string;
   phone: string;
+  phone_ext?: string;
   email: string;
   notes: string;
   name: string; // computed
@@ -48,6 +55,7 @@ interface EditableContactPayload {
   role?: string;
   company?: string;
   phone?: string;
+  phone_ext?: string;
   email?: string;
   notes?: string;
 }
@@ -75,6 +83,7 @@ export default function AddressBookPage() {
     role: "",
     company: "",
     phone: "",
+    phone_ext: "",
     email: "",
     notes: "",
   };
@@ -129,10 +138,8 @@ export default function AddressBookPage() {
       .finally(() => setRolesLoading(false));
   }, []);
 
-  const openAdd = () => {
-    resetForm();
-    setIsAddOpen(true);
-  };
+  // Add contact creation disabled (button removed)
+  const openAdd = () => {};
   const openEdit = (c: ContactItem) => {
     setEditing(c);
     setForm({
@@ -141,6 +148,7 @@ export default function AddressBookPage() {
       role: c.role,
       company: c.company,
       phone: c.phone,
+      phone_ext: c.phone_ext || "",
       email: c.email,
       notes: c.notes,
     });
@@ -166,7 +174,11 @@ export default function AddressBookPage() {
     try {
       const payload: EditableContactPayload = {};
       Object.entries(form).forEach(([k, v]) => {
-        if (v && v.toString().trim() !== "") (payload as any)[k] = v;
+        if (v && v.toString().trim() !== "") {
+          if (k === "phone_ext")
+            (payload as any)[k] = normalizeExtension(String(v));
+          else (payload as any)[k] = v;
+        }
       });
       const res = await fetch("/api/contacts", {
         method: "POST",
@@ -197,7 +209,8 @@ export default function AddressBookPage() {
     try {
       const payload: EditableContactPayload = {};
       Object.entries(form).forEach(([k, v]) => {
-        (payload as any)[k] = v;
+        (payload as any)[k] =
+          k === "phone_ext" ? normalizeExtension(String(v || "")) : v;
       });
       const res = await fetch(`/api/contacts/${editing.id}`, {
         method: "PATCH",
@@ -228,18 +241,9 @@ export default function AddressBookPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Address Book</h1>
-            <p className="text-gray-600">Manage all contacts</p>
-          </div>
-          <Button
-            onClick={openAdd}
-            className="bg-[#92C4D5] hover:bg-[#7BB3C7] text-white"
-          >
-            <PlusIcon className="h-4 w-4 mr-1" />
-            New Contact
-          </Button>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Address Book</h1>
+          <p className="text-gray-600">Manage all contacts</p>
         </div>
 
         <Card>
@@ -304,7 +308,9 @@ export default function AddressBookPage() {
                           {rolesMap[c.role] || c.role || ""}
                         </td>
                         <td className="py-2 px-3">{c.email}</td>
-                        <td className="py-2 px-3">{c.phone}</td>
+                        <td className="py-2 px-3">
+                          {formatPhoneWithExt(c.phone, c.phone_ext)}
+                        </td>
                         <td className="py-2 px-3">
                           <Button
                             variant="outline"
@@ -493,13 +499,13 @@ function ContactFormFields({
           placeholder="name@example.com"
         />
       </div>
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">Phone</Label>
-        <Input
-          value={form.phone}
-          onChange={(e) => updateForm("phone", e.target.value)}
-          className="h-11"
-          placeholder="(555) 123-4567"
+      <div className="space-y-2 md:col-span-2">
+        <PhoneField
+          label="Phone"
+          value={form.phone || ""}
+          extValue={form.phone_ext || ""}
+          onChangePhoneAction={(v) => updateForm("phone", v)}
+          onChangeExtAction={(v) => updateForm("phone_ext", v)}
         />
       </div>
       <div className="md:col-span-2 space-y-2">
