@@ -33,6 +33,8 @@ type HeaderProps = {
   dateReceived: string;
   clientCompany: string;
   clientContact: string;
+  description?: string;
+  claimType?: string;
   participants: Array<{ id: string; name: string; role: string }>;
 };
 
@@ -270,10 +272,13 @@ export default function ClaimDetailsClient() {
           .replace(/,\s+,/g, ", ");
         return [line, cityStateZip].filter(Boolean).join(", ");
       };
+      // Compute days open from date_received (preferred) else fallback to reported/created
+      const sourceDateForDays =
+        claim.date_received || claim.reported_date || claim.date_created;
       const mappedHeader: HeaderProps = {
         claimNumber: claim.claim_number || claim.id || "",
         insuredName: personToName(claim.primary_insured),
-        daysOpen: daysBetween(claim.date_created),
+        daysOpen: daysBetween(sourceDateForDays),
         status: toHeaderStatus(
           claim?.status?.name || claim?.status?.status || claim?.status?.code
         ),
@@ -285,13 +290,27 @@ export default function ClaimDetailsClient() {
                 role: "Assigned Adjuster",
               }
             : null,
+          claim.carrier_contact_id
+            ? {
+                name: personToName(claim.carrier_contact_id),
+                role: "Client Contact",
+              }
+            : null,
         ].filter(Boolean) as Array<{ name: string; role: string }>,
         lossAddress: lossLocationToString(claim.loss_location),
         mailingAddress: lossLocationToString(claim.loss_location),
         dateOfLoss: fmtDate(claim.date_of_loss),
-        dateReceived: fmtDate(claim.reported_date || claim.date_created),
-        clientCompany: "",
-        clientContact: "",
+        // Prefer explicit date_received if present, fallback to reported_date then creation date
+        dateReceived: fmtDate(
+          claim.date_received || claim.reported_date || claim.date_created
+        ),
+        clientCompany: claim?.carrier?.name || "",
+        clientContact: claim?.carrier_contact_id
+          ? personToName(claim.carrier_contact_id)
+          : "",
+        description: claim?.description || undefined,
+        claimType:
+          claim?.claim_type?.name || claim?.claim_type?.code || undefined,
         participants: [
           {
             id: "insured",
@@ -303,6 +322,13 @@ export default function ClaimDetailsClient() {
                 id: String(claim.assigned_to_user.id ?? "assignee"),
                 name: personToName(claim.assigned_to_user),
                 role: "Assigned Adjuster",
+              }
+            : null,
+          claim.carrier_contact_id
+            ? {
+                id: String(claim.carrier_contact_id.id ?? "carrier_contact"),
+                name: personToName(claim.carrier_contact_id),
+                role: "Client Contact",
               }
             : null,
         ].filter(Boolean) as Array<{ id: string; name: string; role: string }>,
