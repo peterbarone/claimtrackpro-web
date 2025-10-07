@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { formatPhone, formatPhoneWithExt } from "@/lib/utils";
 import AppShell from "@/components/AppShell";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,6 +21,7 @@ interface CarrierApi {
   naic?: string | null;
   address?: CarrierAddress | null;
   phone?: string | null;
+  phone_ext?: string | null; // optional extension support
   email?: string | null;
   claims_email_intake?: string | null;
 }
@@ -94,7 +96,12 @@ export default function CarriersPage() {
             c.name.toLowerCase().includes(low) ||
             (c.naic || "").toLowerCase().includes(low) ||
             (c.email || "").toLowerCase().includes(low) ||
-            (c.phone || "").toLowerCase().includes(low) ||
+            (c.phone_ext
+              ? formatPhoneWithExt(c.phone || "", c.phone_ext || "")
+              : formatPhone(c.phone || "")
+            )
+              .toLowerCase()
+              .includes(low) ||
             (c.claims_email_intake || "").toLowerCase().includes(low) ||
             addressToString(c.address)
               .toLowerCase()
@@ -187,27 +194,32 @@ export default function CarriersPage() {
                   </td>
                 </tr>
               )}
-              {filtered.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-2 font-medium text-gray-900">
-                    <Link
-                      href={`/carriers/${c.id}`}
-                      className="text-sky-700 hover:underline"
-                    >
-                      {c.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">{c.naic || ""}</td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {addressToString(c.address)}
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">{c.phone || ""}</td>
-                  <td className="px-4 py-2 text-sky-600">{c.email || ""}</td>
-                  <td className="px-4 py-2 text-sky-600">
-                    {c.claims_email_intake || ""}
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((c) => {
+                const phoneDisplay = c.phone_ext
+                  ? formatPhoneWithExt(c.phone || "", c.phone_ext || "")
+                  : formatPhone(c.phone || "");
+                return (
+                  <tr key={c.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-2 font-medium text-gray-900">
+                      <Link
+                        href={`/carriers/${c.id}`}
+                        className="text-sky-700 hover:underline"
+                      >
+                        {c.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 text-gray-700">{c.naic || ""}</td>
+                    <td className="px-4 py-2 text-gray-700">
+                      {addressToString(c.address)}
+                    </td>
+                    <td className="px-4 py-2 text-gray-700">{phoneDisplay}</td>
+                    <td className="px-4 py-2 text-sky-600">{c.email || ""}</td>
+                    <td className="px-4 py-2 text-sky-600">
+                      {c.claims_email_intake || ""}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

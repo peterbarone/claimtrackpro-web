@@ -52,7 +52,7 @@ export async function GET(req: Request) {
   else if (role) filters.push(`filter[role][_eq]=${encodeURIComponent(role)}`);
   const qs = [
     ...filters,
-  'fields=' + encodeURIComponent(['id','first_name','last_name','role','company','phone','phone_ext','email','notes'].join(',')),
+  'fields=' + encodeURIComponent(['id','first_name','last_name','role','title','company','phone','phone_ext','email','notes'].join(',')),
     'sort=' + encodeURIComponent('last_name,first_name')
   ].join('&');
   try {
@@ -65,7 +65,8 @@ export async function GET(req: Request) {
       id: c.id,
       first_name: c.first_name || '',
       last_name: c.last_name || '',
-      role: c.role || '',
+  role: c.role || '',
+  title: c.title || '',
       company: c.company || '',
       phone: c.phone || '',
       phone_ext: c.phone_ext || '',
@@ -83,7 +84,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   let body: any = {};
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
-  const allowed = ['first_name','last_name','role','company','phone','phone_ext','email','notes'];
+  const allowed = ['first_name','last_name','role','title','company','phone','phone_ext','email','notes'];
   const payload: Record<string, any> = {};
   for (const k of allowed) if (body[k] !== undefined && body[k] !== null && String(body[k]).trim() !== '') payload[k] = typeof body[k] === 'string' ? body[k].trim() : body[k];
   if (!payload.company) return NextResponse.json({ error: 'company is required' }, { status: 400 });

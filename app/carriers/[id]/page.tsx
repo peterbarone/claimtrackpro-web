@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { formatPhoneWithExt, formatPhone } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import Link from "next/link";
@@ -27,17 +28,24 @@ interface ContactRecord {
   first_name: string;
   last_name: string;
   role: string;
+  title: string;
   phone: string;
+  phone_ext: string;
   email: string;
   notes: string;
-  company?: string; // carrier name linkage
-  _editing?: boolean; // local UI state
+  company?: string;
+  _editing?: boolean;
   _saving?: boolean;
   _error?: string | null;
   _deleting?: boolean;
   _dirty?: boolean;
-  _isNew?: boolean; // unsaved new row
+  _isNew?: boolean;
 }
+interface ContactDraft
+  extends Omit<
+    ContactRecord,
+    "_editing" | "_saving" | "_error" | "_deleting" | "_dirty" | "_isNew"
+  > {}
 
 function addressToLines(a?: CarrierAddress | null) {
   if (!a) return ["", ""];
@@ -54,7 +62,6 @@ async function fetchCarrier(id: string): Promise<Carrier | null> {
   const j = await res.json();
   return j?.data || null;
 }
-
 async function updateCarrier(id: string, payload: Partial<Carrier>) {
   const res = await fetch(`/api/carriers/${id}`, {
     method: "PATCH",
@@ -64,7 +71,6 @@ async function updateCarrier(id: string, payload: Partial<Carrier>) {
   if (!res.ok) throw new Error(await res.text());
   return (await res.json())?.data;
 }
-
 async function createAddress(addr: Partial<CarrierAddress>) {
   const res = await fetch("/api/addresses", {
     method: "POST",
@@ -74,7 +80,6 @@ async function createAddress(addr: Partial<CarrierAddress>) {
   if (!res.ok) throw new Error(await res.text());
   return (await res.json())?.data;
 }
-
 async function updateAddress(id: string, addr: Partial<CarrierAddress>) {
   const res = await fetch(`/api/addresses/${id}`, {
     method: "PATCH",
@@ -84,7 +89,6 @@ async function updateAddress(id: string, addr: Partial<CarrierAddress>) {
   if (!res.ok) throw new Error(await res.text());
   return (await res.json())?.data;
 }
-
 async function deleteCarrier(id: string) {
   const res = await fetch(`/api/carriers/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await res.text());
@@ -115,13 +119,18 @@ export default function CarrierDetailPage({
     postal_code: "",
   });
 
-  // Contacts state
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
-  const [contactSavingAll, setContactSavingAll] = useState(false);
+  const [contactSavingAll] = useState(false); // legacy no-op
+  const [editingContact, setEditingContact] = useState<ContactDraft | null>(
+    null
+  );
+  const [contactModalSaving, setContactModalSaving] = useState(false);
+  const [contactModalError, setContactModalError] = useState<string | null>(
+    null
+  );
 
-  // Roles for dropdown
   const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
@@ -133,85 +142,60 @@ export default function CarrierDetailPage({
       const data = await fetchCarrier(carrierId);
       setCarrier(data);
       setForm({
-        name: data?.name,
+        name: data?.name || "",
         naic: data?.naic || "",
         phone: data?.phone || "",
         email: data?.email || "",
         claims_email_intake: data?.claims_email_intake || "",
       });
-      setAddressForm({
-        street_1: data?.address?.street_1 || "",
-        street_2: data?.address?.street_2 || "",
-        city: data?.address?.city || "",
-        state: data?.address?.state || "",
-        postal_code: data?.address?.postal_code || "",
-      });
-    } catch (e) {
-      if (e?.message === "UNAUTHENTICATED") {
-        router.replace("/login");
-        return;
+      if (data?.address) {
+        setAddressForm({
+          street_1: data.address.street_1 || "",
+          street_2: data.address.street_2 || "",
+          city: data.address.city || "",
+          state: data.address.state || "",
+          postal_code: data.address.postal_code || "",
+        });
+      } else {
+        setAddressForm({
+          street_1: "",
+          street_2: "",
+          city: "",
+          state: "",
+          postal_code: "",
+        });
       }
-      setError(e?.message || "Failed to load carrier");
+    } catch (e) {
+      setError(e.message || "Failed to load carrier");
     } finally {
       setLoading(false);
     }
-  }, [carrierId, router]);
+  }, [carrierId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Fetch roles once
-  useEffect(() => {
-    let ignore = false;
-    async function fetchRoles() {
-      setRolesLoading(true);
-      setRolesError(null);
-      try {
-        const r = await fetch("/api/roles", { cache: "no-store" });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j?.error || `Failed (${r.status})`);
-        if (!ignore) setRoles(Array.isArray(j?.data) ? j.data : []);
-      } catch (e) {
-        if (!ignore) setRolesError(e.message || "Failed to load roles");
-      } finally {
-        if (!ignore) setRolesLoading(false);
-      }
-    }
-    fetchRoles();
-    return () => {
-      ignore = true;
-    };
-  }, []);
-
-  const loadContacts = useCallback(async (carrierName?: string) => {
-    if (!carrierName) return;
+  const loadContacts = useCallback(async (carrierName: string) => {
     setContactsLoading(true);
     setContactsError(null);
     try {
       const res = await fetch(
-        `/api/contacts?company=${encodeURIComponent(carrierName)}`,
-        { cache: "no-store" }
+        `/api/contacts?company=${encodeURIComponent(carrierName)}`
       );
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j?.error || `Failed (${res.status})`);
-      const list: ContactRecord[] = (j?.data || []).map((c: any) => ({
-        id: c.id,
-        first_name: c.first_name || "",
-        last_name: c.last_name || "",
-        role: c.role || "",
-        phone: c.phone || "",
-        email: c.email || "",
-        notes: c.notes || "",
-        company: c.company || carrierName,
-        _editing: false,
-        _saving: false,
-        _error: null,
-        _deleting: false,
-        _dirty: false,
-        _isNew: false,
-      }));
-      setContacts(list);
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      const j = await res.json();
+      const items = j?.data || [];
+      setContacts(
+        items.map((c: any) => ({
+          id: c.id,
+          first_name: c.first_name || "",
+          last_name: c.last_name || "",
+          role: c.role || "",
+          title: c.title || "",
+          phone: c.phone || "",
+          phone_ext: c.phone_ext || "",
+          email: c.email || "",
+          notes: c.notes || "",
+          company: c.company,
+        }))
+      );
     } catch (e) {
       setContactsError(e.message || "Failed to load contacts");
     } finally {
@@ -219,31 +203,21 @@ export default function CarrierDetailPage({
     }
   }, []);
 
-  // Load contacts after carrier fetch success
-  useEffect(() => {
-    if (carrier?.name) loadContacts(carrier.name);
-  }, [carrier?.name, loadContacts]);
-
-  const addNewContact = () => {
-    setContacts((c) => [
-      ...c,
-      {
-        first_name: "",
-        last_name: "",
-        role: "",
-        phone: "",
-        email: "",
-        notes: "",
-        company: carrier?.name,
-        _editing: true,
-        _saving: false,
-        _error: null,
-        _deleting: false,
-        _dirty: true,
-        _isNew: true,
-      },
-    ]);
-  };
+  const loadRoles = useCallback(async () => {
+    setRolesLoading(true);
+    setRolesError(null);
+    try {
+      const res = await fetch("/api/roles");
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      const j = await res.json();
+      const data = j?.data || [];
+      setRoles(data.map((r: any) => ({ id: r.id, name: r.name })));
+    } catch (e) {
+      setRolesError(e.message || "Failed to load roles");
+    } finally {
+      setRolesLoading(false);
+    }
+  }, []);
 
   const updateContactLocal = (
     idx: number,
@@ -254,61 +228,67 @@ export default function CarrierDetailPage({
       list.map((c, i) => (i === idx ? { ...c, [key]: value, _dirty: true } : c))
     );
   };
-
-  const toggleEditContact = (idx: number, editing: boolean) => {
-    setContacts((list) =>
-      list.map((c, i) =>
-        i === idx ? { ...c, _editing: editing, _error: null } : c
-      )
-    );
+  const openEditContact = (idx: number) => {
+    const c = contacts[idx];
+    if (!c) return;
+    setEditingContact({
+      id: c.id,
+      first_name: c.first_name || "",
+      last_name: c.last_name || "",
+      role: c.role || "",
+      title: c.title || "",
+      phone: c.phone || "",
+      phone_ext: c.phone_ext || "",
+      email: c.email || "",
+      notes: c.notes || "",
+      company: c.company,
+    });
   };
-
-  const saveContact = async (idx: number) => {
-    // Get latest snapshot of the contact
-    const current = contacts[idx];
-    if (!current) return;
+  const addNewContact = () => {
     if (!carrier?.name) {
-      setContacts((list) =>
-        list.map((c, i) =>
-          i === idx
-            ? { ...c, _error: "Carrier name missing; save carrier first." }
-            : c
-        )
-      );
+      alert("Save carrier before adding contacts");
       return;
     }
-    // Mark saving
-    setContacts((list) =>
-      list.map((c, i) =>
-        i === idx ? { ...c, _saving: true, _error: null } : c
-      )
-    );
+    setEditingContact({
+      first_name: "",
+      last_name: "",
+      role: "",
+      title: "",
+      phone: "",
+      phone_ext: "",
+      email: "",
+      notes: "",
+      company: carrier.name,
+    });
+  };
 
+  const persistDraft = async () => {
+    if (!editingContact) return;
+    if (!carrier?.name) {
+      setContactModalError("Carrier name missing; save carrier first.");
+      return;
+    }
+    setContactModalSaving(true);
+    setContactModalError(null);
     const isUUID = (val: string) =>
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         val || ""
       );
     const payload: any = {
-      first_name: current.first_name || undefined,
-      last_name: current.last_name || undefined,
-      role: isUUID(current.role) ? current.role : undefined,
-      phone: current.phone || undefined,
-      email: current.email || undefined,
-      notes: current.notes || undefined,
+      first_name: editingContact.first_name || undefined,
+      last_name: editingContact.last_name || undefined,
+      role: isUUID(editingContact.role) ? editingContact.role : undefined,
+      title: editingContact.title || undefined,
+      phone: editingContact.phone || undefined,
+      phone_ext: editingContact.phone_ext || undefined,
+      email: editingContact.email || undefined,
+      notes: editingContact.notes || undefined,
       company: carrier.name,
     };
-    if (!payload.company) {
-      setContacts((list) =>
-        list.map((c, i) =>
-          i === idx ? { ...c, _saving: false, _error: "Company required" } : c
-        )
-      );
-      return;
-    }
     try {
       let saved: any;
-      if (current.id) {
-        const res = await fetch(`/api/contacts/${current.id}`, {
+      if (editingContact.id) {
+        const res = await fetch(`/api/contacts/${editingContact.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -330,7 +310,7 @@ export default function CarrierDetailPage({
         }
         saved = j?.data;
       } else {
-        const res = await fetch("/api/contacts", {
+        const res = await fetch(`/api/contacts`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -353,28 +333,11 @@ export default function CarrierDetailPage({
         saved = j?.data;
       }
       if (carrier?.name) await loadContacts(carrier.name);
-      setContacts((list) =>
-        list.map((c, i) =>
-          i === idx
-            ? {
-                ...c,
-                id: saved?.id || c.id,
-                _editing: false,
-                _saving: false,
-                _dirty: false,
-                _isNew: false,
-              }
-            : c
-        )
-      );
+      setEditingContact(null);
     } catch (e) {
-      let msg = e?.message || "Save failed";
-      if (/\(500\)/.test(msg)) msg += " - 500: see network response detail.";
-      setContacts((list) =>
-        list.map((c, i) =>
-          i === idx ? { ...c, _saving: false, _error: msg } : c
-        )
-      );
+      setContactModalError(e?.message || "Save failed");
+    } finally {
+      setContactModalSaving(false);
     }
   };
 
@@ -417,16 +380,8 @@ export default function CarrierDetailPage({
   };
 
   const saveAllDirtyContacts = async () => {
-    const dirtyIndexes = contacts
-      .map((c, i) => (c._dirty ? i : -1))
-      .filter((i) => i >= 0);
-    if (!dirtyIndexes.length) return;
-    setContactSavingAll(true);
-    for (const idx of dirtyIndexes) {
-      // eslint-disable-next-line no-await-in-loop
-      await saveContact(idx);
-    }
-    setContactSavingAll(false);
+    // With modal editing each save persists immediately. This can be a no-op or future bulk action.
+    return;
   };
 
   const onChange = (k: keyof Carrier, v: any) =>
@@ -470,6 +425,16 @@ export default function CarrierDetailPage({
   };
 
   const [addr1, addr2] = addressToLines(carrier?.address);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+  useEffect(() => {
+    if (carrier?.name) loadContacts(carrier.name);
+  }, [carrier?.name, loadContacts]);
+  useEffect(() => {
+    loadRoles();
+  }, [loadRoles]);
 
   return (
     <AppShell>
@@ -533,77 +498,135 @@ export default function CarrierDetailPage({
           <div className="space-y-8">
             <section className="space-y-4">
               <h2 className="text-xl font-semibold text-gray-800">General</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Name *
-                  </label>
-                  <input
-                    disabled={!editing}
-                    value={form.name || ""}
-                    onChange={(e) => onChange("name", e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:bg-gray-100"
-                  />
+              {!editing && (
+                <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6 space-y-5">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <h3 className="text-2xl font-semibold tracking-tight text-gray-900">
+                        {form.name || (
+                          <span className="italic text-gray-400">
+                            Unnamed Carrier
+                          </span>
+                        )}
+                      </h3>
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        {form.naic && (
+                          <span className="inline-flex items-center rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 font-medium">
+                            NAIC {form.naic}
+                          </span>
+                        )}
+                        {form.phone && (
+                          <span className="inline-flex items-center rounded-full bg-gray-50 text-gray-700 border border-gray-200 px-2 py-0.5 font-medium">
+                            {formatPhone(form.phone)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-3 gap-6 text-sm">
+                    <div className="space-y-1">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 font-medium">
+                        Email
+                      </p>
+                      <p className="text-gray-800 break-all">
+                        {form.email || (
+                          <span className="italic text-gray-400">None</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 font-medium">
+                        Claims Intake
+                      </p>
+                      <p className="text-gray-800 break-all">
+                        {form.claims_email_intake || (
+                          <span className="italic text-gray-400">None</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 font-medium">
+                        Phone
+                      </p>
+                      <p className="text-gray-800">
+                        {form.phone ? (
+                          formatPhone(form.phone)
+                        ) : (
+                          <span className="italic text-gray-400">None</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    NAIC
-                  </label>
-                  <input
-                    disabled={!editing}
-                    value={form.naic || ""}
-                    onChange={(e) => onChange("naic", e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Phone
-                  </label>
-                  <input
-                    disabled={!editing}
-                    value={form.phone || ""}
-                    onChange={(e) => onChange("phone", e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:bg-gray-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email
-                  </label>
-                  <input
-                    disabled={!editing}
-                    value={form.email || ""}
-                    onChange={(e) => onChange("email", e.target.value)}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:bg-gray-100"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Claims Intake Email
-                  </label>
-                  <input
-                    disabled={!editing}
-                    value={form.claims_email_intake || ""}
-                    onChange={(e) =>
-                      onChange("claims_email_intake", e.target.value)
-                    }
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:bg-gray-100"
-                  />
-                </div>
-              </div>
-              {saveError && (
-                <div className="text-sm text-red-600">{saveError}</div>
               )}
               {editing && (
-                <div className="flex gap-3 pt-2">
-                  <button
-                    disabled={saving}
-                    onClick={onSave}
-                    className="px-4 py-2 text-sm rounded-md bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-medium"
-                  >
-                    {saving ? "Saving..." : "Save Changes"}
-                  </button>
+                <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-6 space-y-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                    <div>
+                      <label className="block text-xs font-semibold tracking-wide text-gray-600 mb-1">
+                        Name *
+                      </label>
+                      <input
+                        value={form.name || ""}
+                        onChange={(e) => onChange("name", e.target.value)}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold tracking-wide text-gray-600 mb-1">
+                        NAIC
+                      </label>
+                      <input
+                        value={form.naic || ""}
+                        onChange={(e) => onChange("naic", e.target.value)}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold tracking-wide text-gray-600 mb-1">
+                        Phone
+                      </label>
+                      <input
+                        value={form.phone || ""}
+                        onChange={(e) => onChange("phone", e.target.value)}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold tracking-wide text-gray-600 mb-1">
+                        Email
+                      </label>
+                      <input
+                        value={form.email || ""}
+                        onChange={(e) => onChange("email", e.target.value)}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-semibold tracking-wide text-gray-600 mb-1">
+                        Claims Intake Email
+                      </label>
+                      <input
+                        value={form.claims_email_intake || ""}
+                        onChange={(e) =>
+                          onChange("claims_email_intake", e.target.value)
+                        }
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      />
+                    </div>
+                  </div>
+                  {saveError && (
+                    <div className="text-sm text-red-600">{saveError}</div>
+                  )}
+                  <div className="flex gap-3">
+                    <button
+                      disabled={saving}
+                      onClick={onSave}
+                      className="px-4 py-2 text-sm rounded-md bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-medium"
+                    >
+                      {saving ? "Saving..." : "Save Changes"}
+                    </button>
+                  </div>
                 </div>
               )}
             </section>
@@ -611,17 +634,19 @@ export default function CarrierDetailPage({
             <section className="space-y-4">
               <h2 className="text-xl font-semibold text-gray-800">Address</h2>
               {!editing && (
-                <div className="text-sm text-gray-700 space-y-1">
-                  <div>
-                    {addr1 || (
-                      <span className="italic text-gray-400">No address</span>
-                    )}
-                  </div>
-                  <div>{addr2}</div>
+                <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6 text-sm">
+                  {addr1 || addr2 ? (
+                    <div className="space-y-1 text-gray-800">
+                      {addr1 && <p>{addr1}</p>}
+                      {addr2 && <p>{addr2}</p>}
+                    </div>
+                  ) : (
+                    <p className="italic text-gray-400">No address on file</p>
+                  )}
                 </div>
               )}
               {editing && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div className="sm:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Street 1
@@ -790,164 +815,201 @@ export default function CarrierDetailPage({
               {!contactsLoading && !contactsError && contacts.length === 0 && (
                 <div className="text-sm text-gray-500">No contacts.</div>
               )}
-              <div className="space-y-4">
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {contacts.map((c, idx) => (
                   <div
                     key={c.id || `new-${idx}`}
-                    className="p-4 border border-gray-200 rounded-md bg-gray-50 space-y-3 relative"
+                    className="flex flex-col p-4 border border-gray-200 rounded-lg bg-white shadow-sm hover:shadow-md transition-shadow group"
                   >
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                            First
-                          </label>
-                          <input
-                            disabled={!c._editing}
-                            value={c.first_name}
-                            onChange={(e) =>
-                              updateContactLocal(
-                                idx,
-                                "first_name",
-                                e.target.value
-                              )
-                            }
-                            className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                            Last
-                          </label>
-                          <input
-                            disabled={!c._editing}
-                            value={c.last_name}
-                            onChange={(e) =>
-                              updateContactLocal(
-                                idx,
-                                "last_name",
-                                e.target.value
-                              )
-                            }
-                            className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                            Role
-                          </label>
-                          {rolesError ? (
+                    <div className="flex-1">
+                      {c._editing ? (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-2">
                             <input
-                              disabled={!c._editing}
-                              value={c.role}
+                              placeholder="First name"
+                              value={c.first_name}
                               onChange={(e) =>
-                                updateContactLocal(idx, "role", e.target.value)
+                                updateContactLocal(
+                                  idx,
+                                  "first_name",
+                                  e.target.value
+                                )
                               }
-                              className="w-full rounded-md border border-red-300 px-2 py-1 text-xs disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-red-400"
+                              className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400"
                             />
-                          ) : (
-                            <select
-                              disabled={!c._editing || rolesLoading}
-                              value={c.role}
+                            <input
+                              placeholder="Last name"
+                              value={c.last_name}
                               onChange={(e) =>
-                                updateContactLocal(idx, "role", e.target.value)
+                                updateContactLocal(
+                                  idx,
+                                  "last_name",
+                                  e.target.value
+                                )
                               }
-                              className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs bg-white disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:opacity-50"
-                            >
-                              <option value="">
-                                {rolesLoading ? "Loading..." : "Select role"}
-                              </option>
-                              {roles.map((r) => (
-                                <option key={r.id} value={r.id}>
-                                  {r.name}
+                              className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {rolesError ? (
+                              <input
+                                value={c.role}
+                                onChange={(e) =>
+                                  updateContactLocal(
+                                    idx,
+                                    "role",
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full rounded-md border border-red-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-red-400"
+                                placeholder="Role"
+                              />
+                            ) : (
+                              <select
+                                disabled={rolesLoading}
+                                value={c.role}
+                                onChange={(e) =>
+                                  updateContactLocal(
+                                    idx,
+                                    "role",
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:opacity-50"
+                              >
+                                <option value="">
+                                  {rolesLoading ? "Loading..." : "Select role"}
                                 </option>
-                              ))}
-                            </select>
-                          )}
+                                {roles.map((r) => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.name}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            <input
+                              placeholder="Title"
+                              value={c.title}
+                              onChange={(e) =>
+                                updateContactLocal(idx, "title", e.target.value)
+                              }
+                              className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400"
+                            />
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <div className="flex gap-2">
+                              <input
+                                placeholder="Phone"
+                                value={c.phone}
+                                onChange={(e) =>
+                                  updateContactLocal(
+                                    idx,
+                                    "phone",
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400"
+                              />
+                              <input
+                                placeholder="Ext"
+                                value={c.phone_ext}
+                                onChange={(e) =>
+                                  updateContactLocal(
+                                    idx,
+                                    "phone_ext",
+                                    e.target.value
+                                      .replace(/[^0-9]/g, "")
+                                      .slice(0, 8)
+                                  )
+                                }
+                                className="w-20 rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400"
+                              />
+                            </div>
+                            <input
+                              placeholder="Email"
+                              value={c.email}
+                              onChange={(e) =>
+                                updateContactLocal(idx, "email", e.target.value)
+                              }
+                              className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400"
+                            />
+                            <textarea
+                              placeholder="Notes"
+                              value={c.notes}
+                              onChange={(e) =>
+                                updateContactLocal(idx, "notes", e.target.value)
+                              }
+                              className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs min-h-[60px] focus:outline-none focus:ring-2 focus:ring-sky-400"
+                            />
+                          </div>
                         </div>
-                        <div>
-                          <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                            Phone
-                          </label>
-                          <input
-                            disabled={!c._editing}
-                            value={c.phone}
-                            onChange={(e) =>
-                              updateContactLocal(idx, "phone", e.target.value)
-                            }
-                            className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                          />
+                      ) : (
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="font-medium text-gray-900 leading-tight">
+                                {(c.first_name + " " + c.last_name).trim() ||
+                                  "Unnamed Contact"}
+                              </p>
+                              {c.title && (
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                  {c.title}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-xs text-gray-500 space-y-1">
+                            {(c.phone || c.phone_ext) && (
+                              <p>
+                                <span className="font-medium text-gray-700">
+                                  Phone:
+                                </span>{" "}
+                                {c.phone_ext
+                                  ? formatPhoneWithExt(
+                                      c.phone || "",
+                                      c.phone_ext
+                                    )
+                                  : formatPhone(c.phone || "")}
+                              </p>
+                            )}
+                            {c.email && (
+                              <p>
+                                <span className="font-medium text-gray-700">
+                                  Email:
+                                </span>{" "}
+                                {c.email}
+                              </p>
+                            )}
+                            {c.notes && (
+                              <p className="line-clamp-3">
+                                <span className="font-medium text-gray-700">
+                                  Notes:
+                                </span>{" "}
+                                {c.notes}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                            Email
-                          </label>
-                          <input
-                            disabled={!c._editing}
-                            value={c.email}
-                            onChange={(e) =>
-                              updateContactLocal(idx, "email", e.target.value)
-                            }
-                            className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                            Notes
-                          </label>
-                          <textarea
-                            disabled={!c._editing}
-                            value={c.notes}
-                            onChange={(e) =>
-                              updateContactLocal(idx, "notes", e.target.value)
-                            }
-                            className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs min-h-[60px] disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
-                          />
-                        </div>
-                      </div>
+                      )}
                     </div>
                     {c._error && (
-                      <div className="text-[11px] text-red-600">{c._error}</div>
+                      <div className="text-[11px] text-red-600 mt-2">
+                        {c._error}
+                      </div>
                     )}
-                    <div className="absolute top-2 right-2 flex gap-1">
-                      {!c._editing && (
-                        <button
-                          type="button"
-                          onClick={() => toggleEditContact(idx, true)}
-                          className="text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300"
-                        >
-                          Edit
-                        </button>
-                      )}
-                      {c._editing && (
-                        <button
-                          type="button"
-                          disabled={c._saving}
-                          onClick={() => saveContact(idx)}
-                          className="text-[10px] px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                        >
-                          {c._saving ? "Saving..." : "Save"}
-                        </button>
-                      )}
-                      {c._editing && (
-                        <button
-                          type="button"
-                          disabled={c._saving}
-                          onClick={() => toggleEditContact(idx, false)}
-                          className="text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300"
-                        >
-                          Cancel
-                        </button>
-                      )}
+                    <div className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap gap-1 justify-end">
+                      <button
+                        type="button"
+                        onClick={() => openEditContact(idx)}
+                        className="text-[11px] px-2 py-1 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300"
+                      >
+                        Edit
+                      </button>
                       <button
                         type="button"
                         disabled={c._deleting}
                         onClick={() => deleteContact(idx)}
-                        className="text-[10px] px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+                        className="text-[11px] px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
                       >
                         {c._deleting ? "Deleting..." : "Delete"}
                       </button>
@@ -959,6 +1021,230 @@ export default function CarrierDetailPage({
           </div>
         )}
       </div>
+      {editingContact && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-2xl bg-white rounded-xl shadow-xl border border-gray-200">
+            <div className="px-6 pt-6 pb-5 space-y-6 max-h-[80vh] overflow-y-auto">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 tracking-tight">
+                    {editingContact.id ? "Edit Contact" : "New Contact"}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Carrier contact details
+                  </p>
+                </div>
+                <button
+                  onClick={() => !contactModalSaving && setEditingContact(null)}
+                  className="text-gray-400 hover:text-gray-600 transition"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+              {contactModalError && (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-4 py-2">
+                  {contactModalError}
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    First Name
+                  </label>
+                  <input
+                    value={editingContact.first_name}
+                    onChange={(e) =>
+                      setEditingContact((d) =>
+                        d ? { ...d, first_name: e.target.value } : d
+                      )
+                    }
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    Last Name
+                  </label>
+                  <input
+                    value={editingContact.last_name}
+                    onChange={(e) =>
+                      setEditingContact((d) =>
+                        d ? { ...d, last_name: e.target.value } : d
+                      )
+                    }
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    Role
+                  </label>
+                  {rolesError ? (
+                    <input
+                      value={editingContact.role}
+                      onChange={(e) =>
+                        setEditingContact((d) =>
+                          d ? { ...d, role: e.target.value } : d
+                        )
+                      }
+                      className="w-full rounded-md border border-red-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+                      placeholder="Role"
+                    />
+                  ) : (
+                    <select
+                      disabled={rolesLoading}
+                      value={editingContact.role}
+                      onChange={(e) =>
+                        setEditingContact((d) =>
+                          d ? { ...d, role: e.target.value } : d
+                        )
+                      }
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-sky-400 disabled:opacity-50"
+                    >
+                      <option value="">
+                        {rolesLoading ? "Loading..." : "Select role"}
+                      </option>
+                      {roles.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">
+                    Title
+                  </label>
+                  <input
+                    value={editingContact.title}
+                    onChange={(e) =>
+                      setEditingContact((d) =>
+                        d ? { ...d, title: e.target.value } : d
+                      )
+                    }
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                  />
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-gray-600">
+                    Phone & Extension
+                  </label>
+                  <div className="flex gap-3">
+                    <input
+                      value={editingContact.phone}
+                      onChange={(e) =>
+                        setEditingContact((d) =>
+                          d ? { ...d, phone: e.target.value } : d
+                        )
+                      }
+                      className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      placeholder="(###) ###-####"
+                    />
+                    <input
+                      value={editingContact.phone_ext}
+                      onChange={(e) =>
+                        setEditingContact((d) =>
+                          d
+                            ? {
+                                ...d,
+                                phone_ext: e.target.value
+                                  .replace(/[^0-9]/g, "")
+                                  .slice(0, 8),
+                              }
+                            : d
+                        )
+                      }
+                      className="w-28 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                      placeholder="Ext"
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Digits only, up to 8 for extension.
+                  </p>
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-gray-600">
+                    Email
+                  </label>
+                  <input
+                    value={editingContact.email}
+                    onChange={(e) =>
+                      setEditingContact((d) =>
+                        d ? { ...d, email: e.target.value } : d
+                      )
+                    }
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+                    placeholder="name@example.com"
+                  />
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-gray-600">
+                    Notes
+                  </label>
+                  <textarea
+                    value={editingContact.notes}
+                    onChange={(e) =>
+                      setEditingContact((d) =>
+                        d ? { ...d, notes: e.target.value } : d
+                      )
+                    }
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm min-h-[90px] focus:outline-none focus:ring-2 focus:ring-sky-400"
+                    placeholder="Additional context..."
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex flex-wrap justify-between items-center gap-3 rounded-b-xl">
+              <button
+                type="button"
+                disabled={contactModalSaving}
+                onClick={() => setEditingContact(null)}
+                className="px-4 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 transition"
+              >
+                Cancel
+              </button>
+              <div className="flex gap-2">
+                {editingContact.id && (
+                  <button
+                    type="button"
+                    disabled={contactModalSaving}
+                    onClick={async () => {
+                      if (!confirm("Delete this contact?")) return;
+                      try {
+                        const res = await fetch(
+                          `/api/contacts/${editingContact.id}`,
+                          { method: "DELETE" }
+                        );
+                        if (!res.ok) {
+                          const j = await res.json().catch(() => ({}));
+                          throw new Error(j?.error || "Delete failed");
+                        }
+                        if (carrier?.name) await loadContacts(carrier.name);
+                        setEditingContact(null);
+                      } catch (e) {
+                        setContactModalError(e?.message || "Delete failed");
+                      }
+                    }}
+                    className="px-4 py-2 text-sm rounded-md bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 transition"
+                  >
+                    Delete
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={contactModalSaving}
+                  onClick={persistDraft}
+                  className="px-4 py-2 text-sm rounded-md bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 transition"
+                >
+                  {contactModalSaving ? "Saving..." : "Save Contact"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }
