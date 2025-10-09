@@ -106,7 +106,10 @@ export default function StaffPage() {
       setRolesLoading(true);
       setRolesError(null);
       try {
-        const r = await fetch("/api/roles", { cache: "no-store" });
+        // Only show internal roles for staff management UI
+        const r = await fetch("/api/roles?internalOnly=1", {
+          cache: "no-store",
+        });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j?.error || `Failed (${r.status})`);
         if (!ignore) setRoles(Array.isArray(j?.data) ? j.data : []);

@@ -10,6 +10,7 @@ export interface ClaimEditFormProps {
     assignedManagerId?: string | number | null;
     dateOfLoss?: string | null; // ISO
     claimTypeId?: string | number | null;
+    lossCauseId?: string | number | null;
     participants?: Array<{
       id: string;
       role: string;
@@ -45,6 +46,9 @@ export function ClaimEditForm({
   const [claimTypeId, setClaimTypeId] = useState<string | "">(
     initial.claimTypeId ? String(initial.claimTypeId) : ""
   );
+  const [lossCauseId, setLossCauseId] = useState<string | "">(
+    initial.lossCauseId ? String(initial.lossCauseId) : ""
+  );
   const [assignedManagerId, setAssignedManagerId] = useState<string | "">(
     initial.assignedManagerId ? String(initial.assignedManagerId) : ""
   );
@@ -65,16 +69,23 @@ export function ClaimEditForm({
   const [newParticipantContact, setNewParticipantContact] = useState("");
   const [newParticipantRole, setNewParticipantRole] = useState("");
   const [participantBusy, setParticipantBusy] = useState(false);
+  const [lossCauseOptions, setLossCauseOptions] = useState<Option[]>([]);
 
   // Fetch dropdown data
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const [statusRes, staffRes, managersRes] = await Promise.all([
+        const [
+          statusRes,
+          staffRes,
+          managersRes,
+          lossCauseRes,
+        ] = await Promise.all([
           fetch("/api/claim-status", { cache: "no-store" }),
           fetch("/api/staff", { cache: "no-store" }),
           fetch("/api/contacts?role=manager", { cache: "no-store" }),
+          fetch("/api/loss-causes", { cache: "no-store" }),
         ]);
         if (statusRes.ok) {
           const j = await statusRes.json();
@@ -103,6 +114,16 @@ export function ClaimEditForm({
               (j?.data || []).map((m: any) => ({
                 value: String(m.id),
                 label: m.name || m.id,
+              }))
+            );
+        }
+        if (lossCauseRes.ok) {
+          const j = await lossCauseRes.json();
+          if (!cancelled)
+            setLossCauseOptions(
+              (j?.data || []).map((t: any) => ({
+                value: String(t.id),
+                label: t.name || t.id,
               }))
             );
         }
@@ -155,6 +176,8 @@ export function ClaimEditForm({
       payload.date_of_loss = dateOfLoss;
     if (claimTypeId && claimTypeId !== String(initial.claimTypeId || ""))
       payload.claim_type = claimTypeId;
+    if (lossCauseId && lossCauseId !== String(initial.lossCauseId || ""))
+      payload.loss_cause = lossCauseId;
     if (
       assignedManagerId &&
       assignedManagerId !== String(initial.assignedManagerId || "")
@@ -315,6 +338,23 @@ export function ClaimEditForm({
           >
             <option value="">-- Select --</option>
             {claimTypeOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-gray-700">
+            Type of Loss
+          </label>
+          <select
+            value={lossCauseId}
+            onChange={(e) => setLossCauseId(e.target.value)}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">-- Select --</option>
+            {lossCauseOptions.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>

@@ -35,6 +35,7 @@ type HeaderProps = {
   clientContact: string;
   description?: string;
   claimType?: string;
+  lossCause?: string;
   participants: Array<{ id: string; name: string; role: string }>;
 };
 
@@ -311,6 +312,8 @@ export default function ClaimDetailsClient() {
         description: claim?.description || undefined,
         claimType:
           claim?.claim_type?.name || claim?.claim_type?.code || undefined,
+        lossCause:
+          claim?.loss_cause?.name || claim?.loss_cause?.code || undefined,
         participants: [
           {
             id: "insured",
@@ -599,6 +602,7 @@ export default function ClaimDetailsClient() {
               assignedManagerId: claimData?.assigned_manager?.id ?? null,
               dateOfLoss: claimData?.date_of_loss ?? null,
               claimTypeId: claimData?.claim_type?.id ?? null,
+              lossCauseId: claimData?.loss_cause?.id ?? null,
               participants: Array.isArray(claimData?.claims_contacts)
                 ? claimData.claims_contacts.map((cc: any) => ({
                     id: String(cc.id), // junction id used for remove

@@ -24,6 +24,10 @@ function buildClaimPath(id: string, includeAddressLines = true) {
     'date_created',
     'status.*',
     'claim_type.*',
+    // Type of Loss
+    'loss_cause.id',
+    'loss_cause.name',
+    'loss_cause.code',
     // Carrier (client company)
     'carrier.id',
     'carrier.name',
@@ -44,10 +48,6 @@ function buildClaimPath(id: string, includeAddressLines = true) {
     'assigned_to_user.first_name',
     'assigned_to_user.last_name',
     'assigned_to_user.email',
-  // assigned manager (contacts collection presumed)
-  'assigned_manager.id',
-  'assigned_manager.first_name',
-  'assigned_manager.last_name',
     // participants relation (junction like claims_contacts)
     'claims_contacts.id',
     'claims_contacts.role',
@@ -57,6 +57,25 @@ function buildClaimPath(id: string, includeAddressLines = true) {
   ];
   const qs = new URLSearchParams();
   qs.set('fields', FIELDS.join(','));
+  return `/items/claims/${encodeURIComponent(id)}?${qs.toString()}`;
+}
+
+function buildMinimalClaimPath(id: string) {
+  const minimal = [
+    'id',
+    'claim_number',
+    'date_of_loss',
+    'date_received',
+    'reported_date',
+    'description',
+    // keep these as best-effort but okay if stripped by perms
+    'status.id',
+    'status.name',
+    'claim_type.id',
+    'claim_type.name',
+  ];
+  const qs = new URLSearchParams();
+  qs.set('fields', minimal.join(','));
   return `/items/claims/${encodeURIComponent(id)}?${qs.toString()}`;
 }
 
@@ -112,11 +131,27 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     } catch (err: any) {
       const msg = String(err?.message || err || '');
       if (msg.includes('403') || msg.toLowerCase().includes("don't have permission") || msg.toLowerCase().includes('permission')) {
-        const fallbackPath = build(false);
-        const r2 = await dx(fallbackPath, { method: 'GET' });
-        let j2: any = null; try { j2 = await r2.json(); } catch { j2 = {}; }
-        if (!r2.ok) throw new Error(String(r2.status));
-        data = j2;
+        // Try lighter variant (without address lines)
+        try {
+          const fallbackPath = build(false);
+          const r2 = await dx(fallbackPath, { method: 'GET' });
+          let j2: any = null; try { j2 = await r2.json(); } catch { j2 = {}; }
+          if (!r2.ok) throw new Error(String(r2.status));
+          data = j2;
+        } catch (err2: any) {
+          const msg2 = String(err2?.message || err2 || '');
+          // Final minimal attempt: only core fields
+          if (msg2.includes('403') || msg2.toLowerCase().includes('permission')) {
+            const r3 = await dx(buildMinimalClaimPath(params.id), { method: 'GET' });
+            let j3: any = null; try { j3 = await r3.json(); } catch { j3 = {}; }
+            if (!r3.ok) throw new Error(String(r3.status));
+            data = j3;
+          } else if (msg2.includes('404')) {
+            return NextResponse.json({ error: 'Not Found' }, { status: 404 });
+          } else {
+            throw err2;
+          }
+        }
       } else if (msg.includes('404')) {
         return NextResponse.json({ error: 'Not Found' }, { status: 404 });
       } else {
@@ -155,6 +190,7 @@ const MUTABLE_FIELDS = new Set([
   'date_of_loss',
   'reported_date',
   'claim_type',
+  'loss_cause',
 ]);
 
 function sanitizePayload(body: any) {

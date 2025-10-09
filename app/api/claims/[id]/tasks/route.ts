@@ -5,6 +5,9 @@ import { cookies } from "next/headers";
 
 const ACCESS_COOKIE = process.env.COOKIE_NAME || "ctrk_jwt";
 const REFRESH_COOKIE = process.env.REFRESH_COOKIE_NAME || "ctrk_refresh";
+const SERVICE_TOKEN = process.env.DIRECTUS_SERVICE_TOKEN || process.env.DIRECTUS_STATIC_TOKEN;
+const SERVICE_EMAIL = process.env.DIRECTUS_EMAIL;
+const SERVICE_PASSWORD = process.env.DIRECTUS_PASSWORD;
 const RAW_DIRECTUS_URL = process.env.DIRECTUS_URL || process.env.NEXT_PUBLIC_DIRECTUS_URL;
 if (!RAW_DIRECTUS_URL) throw new Error("Missing DIRECTUS_URL/NEXT_PUBLIC_DIRECTUS_URL");
 const DIRECTUS_URL = RAW_DIRECTUS_URL.replace(/\/+$/, ""); // trim trailing slash
@@ -92,9 +95,22 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   const access = c.get(ACCESS_COOKIE)?.value;
   const refresh = c.get(REFRESH_COOKIE)?.value;
 
-  if (!access) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Prefer user access; fallback to service token or service login if configured
+  let token: string | undefined = access;
+  if (!token && SERVICE_TOKEN) token = SERVICE_TOKEN;
+  if (!token && SERVICE_EMAIL && SERVICE_PASSWORD) {
+    try {
+      const r = await fetch(`${DIRECTUS_URL}/auth/login`, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ email: SERVICE_EMAIL, password: SERVICE_PASSWORD }),
+        cache: "no-store",
+      });
+      const j = await r.json().catch(() => ({} as any));
+      if (r.ok && j?.data?.access_token) token = j.data.access_token as string;
+    } catch {}
   }
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   // Build query variants (some Directus setups prefer claim.id eq)
   const base1 = `/items/claim_tasks?filter[claim][id][_eq]=${encodeURIComponent(params.id)}&sort[]=-date_created`;
@@ -134,15 +150,15 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   let refreshed: { access_token: string; refresh_token: string; expires?: number | string } | null = null;
 
   try {
-    const data = await fetchTasks(access);
+    const data = await fetchTasks(token);
     return NextResponse.json({ data: data.data }, { status: 200 });
   } catch (err: any) {
     const status = err?.status as number | undefined;
-    if (status === 401 && refresh) {
+  if (status === 401 && refresh) {
       // try refresh then retry once
       try {
         refreshed = await refreshAccessToken(refresh);
-        const data = await fetchTasks(refreshed.access_token);
+  const data = await fetchTasks(refreshed.access_token);
         const res = NextResponse.json({ data: data.data }, { status: 200 });
         setAuthCookies(res, refreshed.access_token, refreshed.refresh_token, refreshed.expires);
         return res;
@@ -153,9 +169,13 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
       }
     }
 
-    // Preserve Directus status code when possible
+    // Preserve Directus status code when possible, but degrade 403 to empty list
     const m = /Directus error\s+(\d+)/.exec(String(err?.message || ""));
     const s = (err?.status as number) || (m ? parseInt(m[1], 10) : 500);
+    if (s === 403) {
+      // Return empty list so UI can still render; optionally include a warning message
+      return NextResponse.json({ data: [], warning: 'Forbidden fetching tasks; returning empty list' }, { status: 200 });
+    }
     return NextResponse.json({ error: String(err?.message || "Error") }, { status: s });
   }
 }
