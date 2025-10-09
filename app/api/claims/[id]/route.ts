@@ -36,10 +36,13 @@ function buildClaimPath(id: string, includeAddressLines = true) {
     'carrier_contact_id.id',
     'carrier_contact_id.first_name',
     'carrier_contact_id.last_name',
+    'carrier_contact_id.name',
     'carrier_contact_id.email',
     'primary_insured.id',
     'primary_insured.first_name',
     'primary_insured.last_name',
+    'primary_insured.name',
+    'primary_insured.full_name',
     ...(includeAddressLines ? ['loss_location.street_1','loss_location.street_2'] : []),
     'loss_location.city',
     'loss_location.state',
@@ -76,6 +79,37 @@ function buildMinimalClaimPath(id: string) {
   ];
   const qs = new URLSearchParams();
   qs.set('fields', minimal.join(','));
+  return `/items/claims/${encodeURIComponent(id)}?${qs.toString()}`;
+}
+
+function buildSafeClaimPath(id: string) {
+  // A safer-than-minimal set that avoids known-permission-heavy relations (no claims_contacts, no address lines,
+  // no carrier_contact_id, no assigned_to_user), but still provides key UI fields.
+  const safe = [
+    'id',
+    'claim_number',
+    'date_of_loss',
+    'date_received',
+    'reported_date',
+    'description',
+    'status.*',
+    'claim_type.id',
+    'claim_type.name',
+    'loss_cause.id',
+    'loss_cause.name',
+    'loss_cause.code',
+    'carrier.id',
+    'carrier.name',
+    // Avoid nested insured fields to prevent 400 if schema differs; enrichment will fetch details
+    'primary_insured',
+    // Include carrier contact id only; enrichment/participants will resolve name
+    'carrier_contact_id',
+    'loss_location.city',
+    'loss_location.state',
+    'loss_location.postal_code',
+  ];
+  const qs = new URLSearchParams();
+  qs.set('fields', safe.join(','));
   return `/items/claims/${encodeURIComponent(id)}?${qs.toString()}`;
 }
 
@@ -140,12 +174,27 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
           data = j2;
         } catch (err2: any) {
           const msg2 = String(err2?.message || err2 || '');
-          // Final minimal attempt: only core fields
           if (msg2.includes('403') || msg2.toLowerCase().includes('permission')) {
-            const r3 = await dx(buildMinimalClaimPath(params.id), { method: 'GET' });
-            let j3: any = null; try { j3 = await r3.json(); } catch { j3 = {}; }
-            if (!r3.ok) throw new Error(String(r3.status));
-            data = j3;
+            // Try safe (middle-ground) fields next
+            try {
+              const r3 = await dx(buildSafeClaimPath(params.id), { method: 'GET' });
+              let j3: any = null; try { j3 = await r3.json(); } catch { j3 = {}; }
+              if (!r3.ok) throw new Error(String(r3.status));
+              data = j3;
+            } catch (err3: any) {
+              const msg3 = String(err3?.message || err3 || '');
+              // Final minimal attempt: only core fields
+              if (msg3.includes('403') || msg3.toLowerCase().includes('permission')) {
+                const r4 = await dx(buildMinimalClaimPath(params.id), { method: 'GET' });
+                let j4: any = null; try { j4 = await r4.json(); } catch { j4 = {}; }
+                if (!r4.ok) throw new Error(String(r4.status));
+                data = j4;
+              } else if (msg3.includes('404')) {
+                return NextResponse.json({ error: 'Not Found' }, { status: 404 });
+              } else {
+                throw err3;
+              }
+            }
           } else if (msg2.includes('404')) {
             return NextResponse.json({ error: 'Not Found' }, { status: 404 });
           } else {
@@ -163,6 +212,168 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     if (!claim) {
       return NextResponse.json({ error: 'Not Found' }, { status: 404 });
     }
+
+    // --- Enrichment: resolve key relations when missing due to permission filters ---
+    async function fetchClaimField(field: string) {
+      try {
+        const r = await dx(`/items/claims/${encodeURIComponent(params.id)}?fields=${encodeURIComponent(field)}`, { method: 'GET' });
+        const j = await r.json().catch(() => ({} as any));
+        if (!r.ok) throw new Error(String(r.status));
+        return j?.data?.[field];
+      } catch {
+        return undefined;
+      }
+    }
+
+    function normalizeId(val: any): string | undefined {
+      if (!val) return undefined;
+      if (typeof val === 'string') return val;
+      if (typeof val === 'number') return String(val);
+      if (typeof val === 'object' && 'id' in val && val.id) return String((val as any).id);
+      return undefined;
+    }
+
+    async function ensureContactObject(field: 'primary_insured' | 'carrier_contact_id') {
+      const cur = claim?.[field];
+      const hasName = cur && typeof cur === 'object' && (cur.first_name || cur.last_name || cur.name || cur.full_name || (cur as any).display_name);
+      if (hasName) return;
+      // Try get raw id
+      let idVal: any = cur && typeof cur === 'object' && 'id' in cur ? cur.id : undefined;
+      if (!idVal) idVal = await fetchClaimField(field);
+      idVal = normalizeId(idVal);
+      if (!idVal) return;
+      // Determine correct collection for the field
+      const collection = field === 'primary_insured' ? 'insureds' : 'contacts';
+      const fields = 'first_name,last_name,name,company_name,full_name,display_name';
+      try {
+        const r = await dx(`/items/${collection}/${encodeURIComponent(String(idVal))}?fields=${fields}`, { method: 'GET' });
+        const j = await r.json().catch(() => ({} as any));
+        if (!r.ok) throw new Error(String(r.status));
+        const fn = j?.data?.first_name || '';
+        const ln = j?.data?.last_name || '';
+        const nm = j?.data?.name || j?.data?.full_name || j?.data?.display_name || j?.data?.company_name || '';
+        if (fn || ln) {
+          claim[field] = { id: idVal, first_name: fn, last_name: ln };
+        } else if (nm) {
+          claim[field] = { id: idVal, name: nm };
+        }
+      } catch {}
+    }
+
+    async function ensureCarrierObject() {
+      const cur = claim?.carrier;
+      const hasName = cur && typeof cur === 'object' && cur.name;
+      if (hasName) return;
+      let idVal: any = cur && typeof cur === 'object' && 'id' in cur ? cur.id : undefined;
+      if (!idVal) idVal = await fetchClaimField('carrier');
+      idVal = normalizeId(idVal);
+      if (!idVal) return;
+      try {
+        const r = await dx(`/items/carriers/${encodeURIComponent(String(idVal))}?fields=name`, { method: 'GET' });
+        const j = await r.json().catch(() => ({} as any));
+        if (!r.ok) throw new Error(String(r.status));
+        claim.carrier = { id: idVal, name: j?.data?.name };
+      } catch {}
+    }
+
+    async function ensureLossLocation() {
+      const cur = claim?.loss_location;
+      const hasAny = cur && (cur.city || cur.state || cur.postal_code || cur.street_1 || cur.street_2);
+      if (hasAny) return;
+      let idVal: any = cur && typeof cur === 'object' && 'id' in cur ? cur.id : undefined;
+      if (!idVal) idVal = await fetchClaimField('loss_location');
+      idVal = normalizeId(idVal);
+      if (!idVal) return;
+      try {
+        const r = await dx(`/items/addresses/${encodeURIComponent(String(idVal))}?fields=street_1,street_2,city,state,postal_code`, { method: 'GET' });
+        const j = await r.json().catch(() => ({} as any));
+        if (!r.ok) throw new Error(String(r.status));
+        const loc = j?.data || {};
+        claim.loss_location = {
+          id: idVal,
+          street_1: loc.street_1,
+          street_2: loc.street_2,
+          city: loc.city,
+          state: loc.state,
+          postal_code: loc.postal_code,
+        };
+      } catch {}
+    }
+
+    async function ensureInsuredFromPolicy() {
+      // If primary_insured still lacks a readable name, try policy.named_insured
+      const cur = claim?.primary_insured;
+      const hasName = cur && typeof cur === 'object' && (cur.first_name || cur.last_name || cur.name || cur.full_name);
+      if (hasName) return;
+      let policyId: any = await fetchClaimField('policy');
+      policyId = normalizeId(policyId);
+      if (!policyId) return;
+      try {
+        const r = await dx(`/items/policies/${encodeURIComponent(String(policyId))}?fields=named_insured.id,named_insured.first_name,named_insured.last_name,named_insured.name,named_insured.full_name`, { method: 'GET' });
+        const j = await r.json().catch(() => ({} as any));
+        if (!r.ok) throw new Error(String(r.status));
+        const ni = j?.data?.named_insured;
+        if (ni && (ni.first_name || ni.last_name || ni.name || ni.full_name)) {
+          claim.primary_insured = {
+            id: normalizeId(ni) || ni.id,
+            first_name: ni.first_name,
+            last_name: ni.last_name,
+            name: ni.name || ni.full_name,
+          } as any;
+        }
+      } catch {}
+    }
+
+    async function ensureParticipants() {
+      try {
+        const path = `/items/claims_contacts?filter[claims_id][_eq]=${encodeURIComponent(params.id)}&fields=id,role,contacts_id.id,contacts_id.first_name,contacts_id.last_name,contacts_id.name,contacts_id.full_name,contacts_id.display_name`;
+        const r = await dx(path, { method: 'GET' });
+        const j = await r.json().catch(() => ({} as any));
+        if (!r.ok) throw new Error(String(r.status));
+        if (Array.isArray(j?.data)) {
+          claim.claims_contacts = j.data;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    function hasNameLike(x: any): boolean {
+      return !!(x && typeof x === 'object' && (x.first_name || x.last_name || x.name || x.full_name || (x as any).display_name));
+    }
+
+    async function ensureInsuredFromParticipants() {
+      if (hasNameLike(claim?.primary_insured)) return;
+      const list = Array.isArray(claim?.claims_contacts) ? claim.claims_contacts : [];
+      const insuredCC = list.find(
+        (cc: any) => /(insured|policyholder|named)/i.test(String(cc?.role || '')) && hasNameLike(cc?.contacts_id)
+      );
+      if (insuredCC?.contacts_id) {
+        claim.primary_insured = insuredCC.contacts_id;
+      }
+    }
+
+    async function ensureClientContactFromParticipants() {
+      if (hasNameLike(claim?.carrier_contact_id)) return;
+      const list = Array.isArray(claim?.claims_contacts) ? claim.claims_contacts : [];
+      const clientCC = list.find(
+        (cc: any) => /(client|carrier)/i.test(String(cc?.role || '')) && hasNameLike(cc?.contacts_id)
+      );
+      if (clientCC?.contacts_id) {
+        claim.carrier_contact_id = clientCC.contacts_id;
+      }
+    }
+
+    // Run enrichment steps in sequence but independently safe
+  await ensureContactObject('primary_insured');
+  await ensureInsuredFromPolicy();
+    await ensureCarrierObject();
+    await ensureContactObject('carrier_contact_id');
+    await ensureLossLocation();
+  await ensureParticipants();
+  await ensureInsuredFromParticipants();
+  await ensureClientContactFromParticipants();
+
     return NextResponse.json({ data: claim });
   } catch (e: any) {
     const msg = e?.message || String(e);

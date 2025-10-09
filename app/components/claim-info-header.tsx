@@ -17,6 +17,7 @@ interface ClaimInfoHeaderProps {
   clientContact: string;
   description?: string;
   claimType?: string; // human readable claim type name
+  lossCause?: string; // human readable type of loss name
   participants: Array<{
     id: string;
     name: string;
@@ -39,6 +40,7 @@ export function ClaimInfoHeader({
   clientContact,
   description,
   claimType,
+  lossCause,
   participants,
 }: ClaimInfoHeaderProps) {
   const [expanded, setExpanded] = useState(false);
@@ -93,6 +95,14 @@ export function ClaimInfoHeader({
                 title={claimType}
               >
                 {claimType}
+              </Badge>
+            )}
+            {lossCause && (
+              <Badge
+                className="bg-rose-50 text-rose-700 font-medium border border-rose-200"
+                title={lossCause}
+              >
+                {lossCause}
               </Badge>
             )}
           </div>

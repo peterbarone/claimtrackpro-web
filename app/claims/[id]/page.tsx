@@ -228,12 +228,13 @@ export default function ClaimDetailsClient() {
       // Keep raw claim for edit form initial values (description, status, etc.)
       setClaimData(claim);
       const personToName = (
-        p?: { first_name?: string; last_name?: string } | null
+        p?: { first_name?: string; last_name?: string; name?: string } | null
       ) => {
+        const nameOnly = (p?.name || "").trim();
         const first = (p?.first_name || "").trim();
         const last = (p?.last_name || "").trim();
         const full = `${first} ${last}`.trim();
-        return full || "Unknown";
+        return nameOnly || full || "Unknown";
       };
       const fmtDate = (d?: string | null) => {
         if (!d) return "";
@@ -276,15 +277,28 @@ export default function ClaimDetailsClient() {
       // Compute days open from date_received (preferred) else fallback to reported/created
       const sourceDateForDays =
         claim.date_received || claim.reported_date || claim.date_created;
+      // Prefer primary_insured; fallback to a participant with role that includes 'insured'
+      const insuredFromParticipants = Array.isArray(claim.claims_contacts)
+        ? claim.claims_contacts.find((cc: any) =>
+            /insured/i.test(String(cc?.role || ""))
+          )
+        : null;
+      const insuredNameResolved =
+        personToName(claim.primary_insured) !== "Unknown"
+          ? personToName(claim.primary_insured)
+          : insuredFromParticipants?.contacts_id
+          ? personToName(insuredFromParticipants.contacts_id)
+          : "Unknown";
+
       const mappedHeader: HeaderProps = {
         claimNumber: claim.claim_number || claim.id || "",
-        insuredName: personToName(claim.primary_insured),
+        insuredName: insuredNameResolved,
         daysOpen: daysBetween(sourceDateForDays),
         status: toHeaderStatus(
           claim?.status?.name || claim?.status?.status || claim?.status?.code
         ),
         claimContacts: [
-          { name: personToName(claim.primary_insured), role: "Insured" },
+          { name: insuredNameResolved, role: "Insured" },
           claim.assigned_to_user
             ? {
                 name: personToName(claim.assigned_to_user),
@@ -315,11 +329,18 @@ export default function ClaimDetailsClient() {
         lossCause:
           claim?.loss_cause?.name || claim?.loss_cause?.code || undefined,
         participants: [
-          {
-            id: "insured",
-            name: personToName(claim.primary_insured),
-            role: "Insured",
-          },
+          // Insured: prefer primary_insured else claims_contacts with role Insured
+          insuredFromParticipants?.contacts_id
+            ? {
+                id: String(insuredFromParticipants.contacts_id.id ?? "insured"),
+                name: personToName(insuredFromParticipants.contacts_id),
+                role: "Insured",
+              }
+            : {
+                id: "insured",
+                name: personToName(claim.primary_insured),
+                role: "Insured",
+              },
           claim.assigned_to_user
             ? {
                 id: String(claim.assigned_to_user.id ?? "assignee"),
