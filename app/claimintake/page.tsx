@@ -519,7 +519,7 @@ export default function ClaimIntake() {
                   onValueChange={(v) => updateFormData("clientCompany", v)}
                   disabled={clientCompaniesLoading}
                 >
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-11" data-testid="client-company-trigger">
                     <SelectValue placeholder={clientCompaniesLoading ? "Loading..." : "Select client company"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -545,7 +545,7 @@ export default function ClaimIntake() {
                   onValueChange={(v) => updateFormData("clientContact", v)}
                   disabled={!formData.clientCompany || clientContactsLoading}
                 >
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-11" data-testid="client-contact-trigger">
                     <SelectValue placeholder={clientContactsLoading ? "Loading..." : "Select client contact"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1042,6 +1042,8 @@ export default function ClaimIntake() {
                   value={formData.dateOfLoss}
                   onChange={(e) => updateFormData("dateOfLoss", e.target.value)}
                   className="h-11"
+                  id="dateOfLoss"
+                  data-testid="date-of-loss"
                 />
               </div>
 
@@ -1052,6 +1054,8 @@ export default function ClaimIntake() {
                   value={formData.dateReceived}
                   onChange={(e) => updateFormData("dateReceived", e.target.value)}
                   className="h-11"
+                  id="dateReceived"
+                  data-testid="date-received"
                 />
               </div>
 
@@ -1062,7 +1066,7 @@ export default function ClaimIntake() {
                   onValueChange={(v) => updateFormData("typeOfLoss", v)} // v is ID now
                   disabled={lossCausesLoading}
                 >
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-11" data-testid="loss-type-trigger">
                     <SelectValue placeholder={lossCausesLoading ? "Loading..." : "Select loss type"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1084,6 +1088,7 @@ export default function ClaimIntake() {
                 onChange={(e) => updateFormData("lossDescription", e.target.value)}
                 className="min-h-[100px]"
                 placeholder="Describe the loss in detail..."
+                data-testid="loss-description"
               />
             </div>
           </CardContent>
@@ -1106,7 +1111,7 @@ export default function ClaimIntake() {
                   onValueChange={(v) => updateFormData("assignedManager", v)}
                   disabled={staffLoading}
                 >
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-11" data-testid="assigned-manager-trigger">
                     <SelectValue placeholder={staffLoading ? "Loading..." : "Select manager"}>
                       {getStaffName(formData.assignedManager, managers) || (staffLoading ? "Loading..." : "Select manager")}
                     </SelectValue>
@@ -1125,7 +1130,7 @@ export default function ClaimIntake() {
                   onValueChange={(v) => updateFormData("assignedAdjuster", v)}
                   disabled={staffLoading}
                 >
-                  <SelectTrigger className="h-11">
+                  <SelectTrigger className="h-11" data-testid="assigned-adjuster-trigger">
                     <SelectValue placeholder={staffLoading ? "Loading..." : "Select adjuster"}>
                       {getStaffName(formData.assignedAdjuster, adjusters) || (staffLoading ? "Loading..." : "Select adjuster")}
                     </SelectValue>
