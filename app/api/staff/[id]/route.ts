@@ -14,8 +14,8 @@ const SERVICE_EMAIL = process.env.DIRECTUS_EMAIL;
 const SERVICE_PASSWORD = process.env.DIRECTUS_PASSWORD;
 
 // We only read base staff fields; roles resolved separately through staff_roles -> roles.
-const FULL_FIELDS = 'id,first_name,last_name,email,phone,phone_ext';
-const MIN_FIELDS  = 'id,first_name,last_name,email,phone,phone_ext';
+const FULL_FIELDS = 'id,first_name,last_name,title,email,phone,phone_ext';
+const MIN_FIELDS  = 'id,first_name,last_name,title,email,phone,phone_ext';
 
 // Junction collection & field names based on schema:
 // staff_roles (staff_id -> staff.id, role_id -> roles.id)
@@ -212,7 +212,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       id: result.data.id,
       first_name: result.data.first_name || '',
       last_name: result.data.last_name || '',
+      title: result.data.title || '',
       email: result.data._partial ? '' : (result.data.email || ''),
+      phone: result.data._partial ? '' : (result.data.phone || ''),
+      phone_ext: result.data._partial ? '' : (result.data.phone_ext || ''),
       roles: rolesInfo.roles,
       _partial: result.data._partial || (rolesInfo.partial ? true : undefined) || undefined,
     }});
@@ -241,7 +244,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 }
 
 // --- PATCH ---
-const MUTABLE = new Set(['first_name','last_name','email','phone','phone_ext']); // direct 'role' removed; we only sync roles via junction
+const MUTABLE = new Set(['first_name','last_name','title','email','phone','phone_ext']); // direct 'role' removed; we only sync roles via junction
 
 async function syncRoles(staffId: string, desiredRoleIds: string[], token: string) {
   const path = `/items/${STAFF_ROLES_COLLECTION}?filter[${STAFF_ROLES_STAFF_FIELD}][_eq]=${encodeURIComponent(staffId)}&fields=id,${STAFF_ROLES_ROLE_FIELD}`;

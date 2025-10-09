@@ -283,21 +283,31 @@ export default function ClaimIntake() {
       .finally(() => setLossCausesLoading(false));
   }, []);
 
-  // Dynamic managers/adjusters (all staff; UI keeps both)
-  const [staff, setStaff] = useState<{ id: string; name: string }[]>([]);
+  // Dynamic managers/adjusters (filtered by staff roles)
+  const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
+  const [adjusters, setAdjusters] = useState<{ id: string; name: string }[]>([]);
   const [staffLoading, setStaffLoading] = useState(true);
   useEffect(() => {
     setStaffLoading(true);
-    fetch("/api/staff")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && Array.isArray(data.data)) {
-          setStaff(data.data.map((s: any) => ({ id: String(s.id), name: s.name })));
-        } else {
-          setStaff([]);
-        }
+    Promise.all([
+      fetch("/api/staff?role=manager", { cache: "no-store" }).then(r => r.json()).catch(() => ({ data: [] })),
+      // Accept multiple keys used in our roles: adjuster (generic), field_adjuster, desk_adjuster, executive_general_adjuster
+      fetch("/api/staff?role=adjuster&role=field_adjuster&role=desk_adjuster&role=executive_general_adjuster", { cache: "no-store" }).then(r => r.json()).catch(() => ({ data: [] })),
+    ])
+      .then(([mgr, adj]) => {
+        const map = (arr: any[]): { id: string; name: string }[] =>
+          (Array.isArray(arr) ? arr : []).map((s: any) => {
+            const base = (s.name || `${s.first_name || ""} ${s.last_name || ""}`.trim() || s.email || s.id).trim();
+            const label = s.title ? `${base} — ${s.title}` : base;
+            return { id: String(s.id), name: label };
+          }).sort((a, b) => a.name.localeCompare(b.name));
+        setManagers(map(mgr?.data || []));
+        setAdjusters(map(adj?.data || []));
       })
-      .catch(() => setStaff([]))
+      .catch(() => {
+        setManagers([]);
+        setAdjusters([]);
+      })
       .finally(() => setStaffLoading(false));
   }, []);
 
@@ -1098,11 +1108,11 @@ export default function ClaimIntake() {
                 >
                   <SelectTrigger className="h-11">
                     <SelectValue placeholder={staffLoading ? "Loading..." : "Select manager"}>
-                      {getStaffName(formData.assignedManager, staff) || (staffLoading ? "Loading..." : "Select manager")}
+                      {getStaffName(formData.assignedManager, managers) || (staffLoading ? "Loading..." : "Select manager")}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {staff.map((s) => (
+                    {managers.map((s) => (
                       <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1117,11 +1127,11 @@ export default function ClaimIntake() {
                 >
                   <SelectTrigger className="h-11">
                     <SelectValue placeholder={staffLoading ? "Loading..." : "Select adjuster"}>
-                      {getStaffName(formData.assignedAdjuster, staff) || (staffLoading ? "Loading..." : "Select adjuster")}
+                      {getStaffName(formData.assignedAdjuster, adjusters) || (staffLoading ? "Loading..." : "Select adjuster")}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {staff.map((s) => (
+                    {adjusters.map((s) => (
                       <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>

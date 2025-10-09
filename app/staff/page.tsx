@@ -16,7 +16,10 @@ interface StaffItem {
   name: string;
   first_name?: string;
   last_name?: string;
+  title?: string;
   email?: string;
+  phone?: string;
+  phone_ext?: string;
   roles?: RoleItem[]; // normalized roles array
 }
 
@@ -33,6 +36,7 @@ export default function StaffPage() {
   const [form, setForm] = useState({
     first_name: "",
     last_name: "",
+    title: "",
     email: "",
     phone: "",
     phone_ext: "",
@@ -44,6 +48,7 @@ export default function StaffPage() {
   const [createForm, setCreateForm] = useState({
     first_name: "",
     last_name: "",
+    title: "",
     email: "",
     phone: "",
     phone_ext: "",
@@ -77,6 +82,7 @@ export default function StaffPage() {
                     s.name ||
                     `${s.first_name || ""} ${s.last_name || ""}`.trim() ||
                     s.id,
+                  title: s.title || "",
                   roles: Array.isArray(s.roles) ? s.roles : [],
                 }))
               : []
@@ -127,12 +133,14 @@ export default function StaffPage() {
       name: summary?.name || id,
       first_name: "",
       last_name: "",
+      title: "",
       email: "",
       roles: [],
     });
     setForm({
       first_name: "",
       last_name: "",
+      title: "",
       email: "",
       phone: "",
       phone_ext: "",
@@ -154,6 +162,7 @@ export default function StaffPage() {
             data.id,
           first_name: data.first_name || "",
           last_name: data.last_name || "",
+          title: data.title || "",
           email: data.email || "",
           roles,
         };
@@ -161,6 +170,7 @@ export default function StaffPage() {
         setForm({
           first_name: item.first_name,
           last_name: item.last_name,
+          title: item.title || "",
           email: item.email,
           phone: data.phone || "",
           phone_ext: data.phone_ext || "",
@@ -178,6 +188,7 @@ export default function StaffPage() {
       name: summary?.name || id,
       first_name: "",
       last_name: "",
+      title: "",
       email: "",
       roles: [],
     });
@@ -197,7 +208,10 @@ export default function StaffPage() {
             data.id,
           first_name: data.first_name || "",
           last_name: data.last_name || "",
+          title: data.title || "",
           email: data.email || "",
+          phone: data.phone || "",
+          phone_ext: data.phone_ext || "",
           roles,
         });
       })
@@ -214,6 +228,7 @@ export default function StaffPage() {
       const payload: any = {
         first_name: form.first_name,
         last_name: form.last_name,
+        title: form.title,
         email: form.email,
         phone: form.phone || undefined,
         phone_ext: form.phone_ext || undefined,
@@ -251,6 +266,7 @@ export default function StaffPage() {
                       d.name ||
                       `${d.first_name || ""} ${d.last_name || ""}`.trim() ||
                       d.id,
+                    title: d.title || "",
                     first_name: d.first_name,
                     last_name: d.last_name,
                     email: d.email,
@@ -299,6 +315,7 @@ export default function StaffPage() {
               setCreateForm({
                 first_name: "",
                 last_name: "",
+                title: "",
                 email: "",
                 phone: "",
                 phone_ext: "",
@@ -341,6 +358,9 @@ export default function StaffPage() {
                     <p className="text-sm font-medium text-gray-900">
                       {s.name}
                     </p>
+                    {s.title ? (
+                      <p className="text-xs text-gray-500">{s.title}</p>
+                    ) : null}
                     <p className="text-xs text-gray-500">ID: {s.id}</p>
                     <p className="text-[11px] text-gray-500 mt-1">
                       {s.roles && s.roles.length ? (
@@ -420,6 +440,20 @@ export default function StaffPage() {
                   value={form.last_name}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, last_name: e.target.value }))
+                  }
+                  className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={editLoading}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Title
+                </label>
+                <input
+                  type="text"
+                  value={form.title}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, title: e.target.value }))
                   }
                   className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={editLoading}
@@ -567,6 +601,16 @@ export default function StaffPage() {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">
+                  Title
+                </p>
+                <p className="font-medium text-gray-900">
+                  {viewTarget.title || (
+                    <span className="text-gray-400">(none)</span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500">
                   Roles
                 </p>
                 <p className="font-medium text-gray-900">
@@ -585,9 +629,10 @@ export default function StaffPage() {
                   Phone
                 </p>
                 <p className="font-medium text-gray-900">
-                  {formatPhone((viewTarget as any).phone || "") || (
-                    <span className="text-gray-400">(none)</span>
-                  )}
+                  {formatPhoneWithExt(
+                    (viewTarget as any).phone || "",
+                    (viewTarget as any).phone_ext || ""
+                  ) || <span className="text-gray-400">(none)</span>}
                 </p>
               </div>
               <div className="md:col-span-2">
@@ -635,6 +680,7 @@ export default function StaffPage() {
                 body: JSON.stringify({
                   first_name: createForm.first_name,
                   last_name: createForm.last_name,
+                  title: createForm.title,
                   email: createForm.email,
                   phone: createForm.phone || undefined,
                   phone_ext: createForm.phone_ext || undefined,
@@ -658,6 +704,7 @@ export default function StaffPage() {
                       `${item.first_name || ""} ${item.last_name ||
                         ""}`.trim() ||
                       item.id,
+                    title: item.title || "",
                     roles: Array.isArray(item.roles) ? item.roles : [],
                   },
                   ...prev,
@@ -700,6 +747,19 @@ export default function StaffPage() {
                 value={createForm.last_name}
                 onChange={(e) =>
                   setCreateForm((f) => ({ ...f, last_name: e.target.value }))
+                }
+                className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Title
+              </label>
+              <input
+                type="text"
+                value={createForm.title}
+                onChange={(e) =>
+                  setCreateForm((f) => ({ ...f, title: e.target.value }))
                 }
                 className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />

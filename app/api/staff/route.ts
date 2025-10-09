@@ -63,9 +63,9 @@ async function fetchRolesForStaffBatch(staffIds: string[]): Promise<Record<strin
   return out;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-  const res = await dx(`/items/staff?fields=id,first_name,last_name,email,phone,phone_ext&sort=last_name,first_name`);
+  const res = await dx(`/items/staff?fields=id,first_name,last_name,title,email,phone,phone_ext&sort=last_name,first_name`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error("Directus staff fetch failed:", res.status, data);
@@ -74,15 +74,30 @@ export async function GET() {
     const list: any[] = (data as any).data || [];
     const staffIds = list.map(s => s.id).filter(Boolean);
     const rolesMap = await fetchRolesForStaffBatch(staffIds);
-    const staff = list.map(s => ({
+    let staff = list.map(s => ({
       id: s.id,
       first_name: s.first_name || '',
       last_name: s.last_name || '',
+      title: s.title || '',
       email: s.email || '',
       phone: s.phone || '',
       phone_ext: s.phone_ext || '',
       roles: rolesMap[s.id] || []
     }));
+    // Optional filtering by role via query params (?role=manager&role=desk_adjuster)
+    try {
+      const url = new URL(req.url);
+      const rolesWanted = url.searchParams.getAll('role').map(v => String(v).toLowerCase()).filter(Boolean);
+      if (rolesWanted.length) {
+        staff = staff.filter(s =>
+          Array.isArray(s.roles) && s.roles.some((r:any) => {
+            const key = String(r?.key || '').toLowerCase();
+            const name = String(r?.name || '').toLowerCase();
+            return rolesWanted.includes(key) || rolesWanted.includes(name);
+          })
+        );
+      }
+    } catch {}
     return NextResponse.json({ data: staff });
   } catch (err: any) {
     console.error("/api/staff error:", err);
@@ -91,7 +106,7 @@ export async function GET() {
 }
 
 // We no longer create/write a direct 'role' field to staff; roles live exclusively in staff_roles junction.
-const CREATABLE_FIELDS = new Set(['first_name','last_name','email','phone','phone_ext']);
+const CREATABLE_FIELDS = new Set(['first_name','last_name','title','email','phone','phone_ext']);
 
 // Junction table constants (mirrors logic in [id]/route.ts)
 const STAFF_ROLES_COLLECTION = 'staff_roles';
@@ -188,7 +203,7 @@ export async function POST(req: Request) {
       }
     }
 
-  const responseBody: any = { data: { id: item.id, first_name: item.first_name || '', last_name: item.last_name || '', email: item.email || '', phone: item.phone || '', phone_ext: item.phone_ext || '', roles } };
+  const responseBody: any = { data: { id: item.id, first_name: item.first_name || '', last_name: item.last_name || '', title: item.title || '', email: item.email || '', phone: item.phone || '', phone_ext: item.phone_ext || '', roles } };
     if (warning) responseBody.warning = warning;
     return NextResponse.json(responseBody, { status: 201 });
   } catch (e:any) {
