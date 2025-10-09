@@ -114,10 +114,11 @@ async function createAddressOrNull(a?: AddressInput) {
   if (!hasAny) return null;
 
   const payload = {
-    street: a.street1 || null,
+    street_1: a.street1 || null,
+    street_2: a.street2 || null,
     city: a.city || null,
     state: a.state || null,
-    zip_code: a.zip || null,
+    postal_code: a.zip || null,
     country: "USA",
   };
 
@@ -153,9 +154,7 @@ async function createInsured(p: InsuredInput, mailingAddressId: string | null) {
     email: p.email || null,
     phone: p.phone || null,
     phone_2: p.phone2 || null,
-    // New extension fields added to insureds collection
-    primary_phone_phone_ext: cleanExt(p.phone_ext) ,
-    alt_phone_phone_ext: cleanExt(p.phone2_ext),
+    // Phone extension fields are omitted unless present in schema; keep server lean
     mailing_address: mailingAddressId,
   };
 
@@ -233,6 +232,7 @@ export async function POST(req: Request) {
       insuredPersons = [],
       additionalContacts = [],
       coverageLines = [],
+      claimParticipants = [],
     } = body ?? {};
 
     // Basic normalization
@@ -337,7 +337,7 @@ export async function POST(req: Request) {
     );
     const claimId = claim?.id as string;
 
-    // 5) Additional Contacts (optional) + junction rows
+    // 5) Additional Contacts (optional) + junction rows (with optional role label)
     if (Array.isArray(additionalContacts) && additionalContacts.length > 0) {
       for (const c of additionalContacts) {
         // Skip empty rows
@@ -352,9 +352,23 @@ export async function POST(req: Request) {
         const newContactId = await createContact(c);
 
         // link via claims_contacts
+        const roleLabel = (c as any)?.customType?.trim() || (c as any)?.contactType?.trim() || null;
         await directusRequest(
           `/items/claims_contacts`,
-          { method: "POST", body: JSON.stringify({ claims_id: claimId, contacts_id: newContactId }) }
+          { method: "POST", body: JSON.stringify({ claims_id: claimId, contacts_id: newContactId, role: roleLabel }) }
+        );
+      }
+    }
+
+    // 5b) Existing Claim Participants (contacts already exist): write junction rows with optional role label
+    if (Array.isArray(claimParticipants) && claimParticipants.length > 0) {
+      for (const p of claimParticipants) {
+        const contactId = (p as any)?.contactId;
+        if (!contactId) continue;
+        const roleLabel = (p as any)?.role?.trim() || null;
+        await directusRequest(
+          `/items/claims_contacts`,
+          { method: "POST", body: JSON.stringify({ claims_id: claimId, contacts_id: contactId, role: roleLabel }) }
         );
       }
     }
