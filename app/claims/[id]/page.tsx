@@ -19,6 +19,7 @@ import { NotesPanel, NoteItem } from "@/components/notes-panel";
 import { FilesPanel, ClaimFile } from "@/components/files-panel";
 import { FileUploadForm } from "@/components/file-upload-form";
 import { ClaimEditForm } from "@/components/claim-edit-form";
+import { ClaimMessagesPanel } from "@/components/claim-messages-panel";
 
 /* ========= Inline shared types (no server import needed) ========= */
 type HeaderProps = {
@@ -481,6 +482,18 @@ export default function ClaimDetailsClient() {
                 onMarkComplete={(taskId) =>
                   handleTaskAction("complete", taskId)
                 }
+                onEditTask={(taskId) => handleTaskAction("edit", taskId)}
+                onCancelTask={(taskId) => handleTaskAction("cancel", taskId)}
+              />
+            </div>
+
+            {/* NEW: Messages */}
+              {claimId && <ClaimMessagesPanel claimId={String(claimId)} />}
+
+            <div className="flex-1">
+              <ActiveTasksPanel
+                tasks={activeTasks}
+                onMarkComplete={(taskId) => handleTaskAction("complete", taskId)}
                 onEditTask={(taskId) => handleTaskAction("edit", taskId)}
                 onCancelTask={(taskId) => handleTaskAction("cancel", taskId)}
               />
