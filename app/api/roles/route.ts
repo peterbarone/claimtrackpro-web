@@ -41,7 +41,7 @@ async function dx(path: string, init?: RequestInit) {
 export async function GET() {
   try {
     // Fetch minimal fields for UI list
-    const res = await dx(`/items/roles?fields=id,name&sort=name`);
+    const res = await dx(`/items/roles?fields=id,name,role_type&sort=name`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error("Directus roles fetch failed:", res.status, data);

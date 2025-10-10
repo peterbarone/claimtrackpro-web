@@ -60,7 +60,7 @@ export default function StaffPage() {
   const [viewError, setViewError] = useState<string | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   // Roles dropdown data
-  const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
+  const [roles, setRoles] = useState<{ id: string; name: string; role_type?: string }[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
 
@@ -109,7 +109,7 @@ export default function StaffPage() {
         const r = await fetch("/api/roles", { cache: "no-store" });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j?.error || `Failed (${r.status})`);
-        if (!ignore) setRoles(Array.isArray(j?.data) ? j.data : []);
+        if (!ignore) setRoles((Array.isArray(j?.data) ? j.data : []).filter((x: any) => x?.role_type === "internal"));
       } catch (e) {
         if (!ignore) setRolesError(e.message || "Failed to load roles");
       } finally {
